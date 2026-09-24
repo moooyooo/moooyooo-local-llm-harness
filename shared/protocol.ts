@@ -32,6 +32,8 @@ export type ClientMessage =
   | { type: 'permission'; key: string; requestId: string; allow: boolean; message?: string }
   | { type: 'interrupt'; key: string }
   | { type: 'stop'; key: string }
+  /** Summarize the conversation now (the 「会話を要約」 button). */
+  | { type: 'compact'; key: string }
   | { type: 'listSessions' }
   /** Installed and loaded models, and the Ollama connection state. */
   | { type: 'listModels' }
@@ -101,6 +103,11 @@ export type AgentEvent =
   | { type: 'user'; text: string }
   /** The harness sent the model a message on its own (e.g. asking to retry a cut-off reply in smaller steps). */
   | { type: 'notice'; text: string }
+  /**
+   * Older messages being replaced by a summary, automatically near the context limit or on request.
+   * Token counts are estimates of the prompt size.
+   */
+  | { type: 'compact'; phase: 'start' | 'done' | 'failed'; auto: boolean; summary?: string; tokensBefore?: number; tokensAfter?: number; message?: string }
   /** A finished assistant message. Replaces the streamed deltas. */
   | { type: 'assistant'; text: string; thinking?: string; toolCalls: ToolCall[] }
   | { type: 'toolResult'; id: string; output: string; isError: boolean }

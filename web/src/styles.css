@@ -250,6 +250,10 @@ pre.diff .ctx { color: var(--muted); }
 .result.error { color: var(--ng); }
 .notice.error { color: var(--ng); }
 .thinking-dots { color: var(--muted); font-size: 13px; }
+.compaction { border: 1px dashed var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.compaction summary { cursor: pointer; color: var(--muted); text-align: center; }
+.compaction-body { border-top: 1px solid var(--border); margin-top: 6px; }
+.session button.small { align-self: flex-start; }
 .thinking-dots .hint-muted { margin-top: 2px; }
 .continue { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
 

@@ -45,7 +45,9 @@ export type Item =
       /** The turn stopped before the model finished (error, interrupt, limit, cut-off), so continuing is offered. */
       unfinished: boolean;
     }
-  | { kind: 'notice'; id: string; level: 'info' | 'error'; text: string };
+  | { kind: 'notice'; id: string; level: 'info' | 'error'; text: string }
+  /** Older messages were replaced by this summary (estimated prompt tokens before → after). */
+  | { kind: 'compact'; id: string; auto: boolean; summary: string; tokensBefore?: number; tokensAfter?: number };
 
 export type PermissionItem = Extract<Item, { kind: 'permission' }>;
 
@@ -78,6 +80,8 @@ export interface Tab {
   stats?: TurnStats;
   /** When the latest prompt or event of this tab arrived (ms), to show how long the model has been quiet. */
   lastActivity?: number;
+  /** The model is summarizing the conversation. */
+  compacting?: boolean;
   /** A turn finished while another tab was active. Cleared when the tab is shown. */
   unread: boolean;
 }
@@ -159,7 +163,9 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         connected: action.value,
-        tabs: action.value ? state.tabs : state.tabs.map((t) => ({ ...t, running: false, busy: false, streamText: '', streamThinking: '' })),
+        tabs: action.value
+          ? state.tabs
+          : state.tabs.map((t) => ({ ...t, running: false, busy: false, compacting: false, streamText: '', streamThinking: '' })),
       };
     case 'newTab':
       return { ...state, tabs: [...state.tabs, newTab(action.cwd, action.key)], activeKey: action.key };
@@ -221,7 +227,7 @@ function onServer(state: State, msg: ServerMessage, at: number): State {
       return { ...state, sessions: msg.sessions, folders: msg.folders };
     case 'status':
       return updateTab(state, msg.key, (t) =>
-        msg.running ? { ...t, running: true } : { ...t, running: false, busy: false, streamText: '', streamThinking: '' },
+        msg.running ? { ...t, running: true } : { ...t, running: false, busy: false, compacting: false, streamText: '', streamThinking: '' },
       );
     case 'error':
       return updateTab(state, msg.key ?? state.activeKey, (t) =>
@@ -259,6 +265,20 @@ function onEvent(tab: Tab, ev: AgentEvent): Tab {
       return pushItems(tab, { kind: 'user', id: nextId(), text: ev.text });
     case 'notice':
       return pushItems(tab, notice(ev.text));
+    case 'compact': {
+      // A manual compaction runs between turns, so only then does it decide whether the tab is busy.
+      const busy = ev.auto ? tab.busy : ev.phase === 'start';
+      if (ev.phase === 'start') return { ...tab, busy, compacting: true };
+      const next = { ...tab, busy, compacting: false };
+      if (ev.phase === 'failed') {
+        return pushItems(next, { kind: 'notice', id: nextId(), level: 'error', text: `会話の要約に失敗しました: ${ev.message ?? '不明なエラー'}` });
+      }
+      const { auto, tokensBefore, tokensAfter } = ev;
+      return {
+        ...pushItems(next, { kind: 'compact', id: nextId(), auto, summary: ev.summary ?? '', tokensBefore, tokensAfter }),
+        stats: next.stats && tokensAfter != null ? { ...next.stats, contextUsed: tokensAfter } : next.stats,
+      };
+    }
     case 'assistant': {
       const items: Item[] = [];
       if (ev.thinking) items.push({ kind: 'thinking', id: nextId(), text: ev.thinking });
@@ -313,6 +333,7 @@ function onEvent(tab: Tab, ev: AgentEvent): Tab {
           unfinished: ev.subtype !== 'success' || !!ev.message,
         }),
         busy: false,
+        compacting: false,
         streamText: '',
         streamThinking: '',
         stats: ev.stats ?? tab.stats,

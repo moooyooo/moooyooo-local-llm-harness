@@ -21,7 +21,12 @@ export type SessionRecord =
   | { type: 'meta'; sessionId: string; cwd: string; model: string; timestamp: string }
   /** `notice`: the harness wrote this message itself; the GUI shows the notice instead of the message. */
   | { type: 'message'; message: OllamaMessage; isError?: boolean; notice?: string; timestamp: string }
-  | { type: 'result'; result: ResultEvent; timestamp: string };
+  | { type: 'result'; result: ResultEvent; timestamp: string }
+  /**
+   * The conversation was compacted: from here on it is `messages` (the summary and the messages kept as they were).
+   * Earlier records stay in the file for the GUI's history.
+   */
+  | { type: 'compact'; messages: OllamaMessage[]; summary: string; auto: boolean; tokensBefore: number; tokensAfter: number; timestamp: string };
 
 export class SessionStore {
   readonly dir: string;
@@ -126,7 +131,12 @@ function summarize(sessionId: string, text: string, mtime: Date): SessionSummary
 
 /** The conversation to send to Ollama when resuming. */
 export function toMessages(records: SessionRecord[]): OllamaMessage[] {
-  return records.flatMap((r) => (r.type === 'message' ? [r.message] : []));
+  let messages: OllamaMessage[] = [];
+  for (const r of records) {
+    if (r.type === 'message') messages.push(r.message);
+    else if (r.type === 'compact') messages = [...r.messages];
+  }
+  return messages;
 }
 
 /** Past turns as GUI events, newest `HISTORY_LIMIT`. */
@@ -134,6 +144,10 @@ export function toEvents(records: SessionRecord[]): { events: AgentEvent[]; omit
   const events: AgentEvent[] = [];
   for (const r of records) {
     if (r.type === 'result') events.push(r.result);
+    if (r.type === 'compact') {
+      const { summary, auto, tokensBefore, tokensAfter } = r;
+      events.push({ type: 'compact', phase: 'done', summary, auto, tokensBefore, tokensAfter });
+    }
     if (r.type !== 'message') continue;
     const m = r.message;
     if (r.notice) events.push({ type: 'notice', text: r.notice });

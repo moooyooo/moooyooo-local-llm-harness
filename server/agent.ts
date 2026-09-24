@@ -1,7 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { AgentEvent, PermissionMode, ThinkSetting, ToolCall, TurnStats } from '../shared/protocol.js';
-import type { ChatFn, ChatRequest, ChatResult, OllamaMessage } from './ollama.js';
+import {
+  cleanSummary,
+  COMPACT_AT,
+  keepBudget,
+  messagesTokens,
+  PIECE_OVERHEAD,
+  piecePrompt,
+  requestTokens,
+  splitPoint,
+  SUMMARY_HEADER,
+  SUMMARY_PROMPT,
+  summaryMessages,
+  transcriptPieces,
+} from './compact.js';
+import type { ChatFn, ChatRequest, ChatResult, OllamaMessage, OllamaTool } from './ollama.js';
 import { describeError } from './ollama.js';
 import { assess, gate } from './permissions.js';
 import type { SessionRecord, SessionStore } from './store.js';
@@ -68,12 +82,17 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   private abort?: AbortController;
   private metaWritten = false;
   private lastCall = { sig: '', count: 0 };
+  /** Prompt tokens Ollama reported for the last call, and how many messages that prompt had. */
+  private baseline?: { tokens: number; messages: number };
+  /** The user's latest prompt, repeated word for word in a summary that replaces it. */
+  private lastPrompt?: string;
 
   constructor(config: AgentConfig, deps: AgentDeps) {
     super();
     this.config = config;
     this.deps = deps;
     this.messages = closeDanglingToolCalls(config.history ?? []);
+    this.lastPrompt = this.messages.findLast((m) => m.role === 'user' && !isHarnessMessage(m.content))?.content;
     this.tools = config.capabilities.includes('tools');
     // Built once: a stable prompt prefix lets Ollama reuse its KV cache between calls.
     this.systemPrompt = buildSystemPrompt({ cwd: config.cwd, permissionMode: config.permissionMode, tools: this.tools });
@@ -99,6 +118,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     let result: Extract<AgentEvent, { type: 'result' }>;
     let cutOffRetried = false;
     this.lastCall = { sig: '', count: 0 };
+    this.lastPrompt = text;
     this.push({ role: 'user', content: text });
 
     try {
@@ -108,7 +128,12 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
           break;
         }
         turns++;
+        await this.compactIfFull(ctrl.signal);
+        const sent = this.messages.length;
         const res = await this.callModel(ctrl.signal);
+        // Ollama counts the whole prompt, cached part included. The reply is estimated from what is kept of it:
+        // a cut-off tool call is dropped, and templates may leave out thinking.
+        if (res.promptEvalCount > 0) this.baseline = { tokens: res.promptEvalCount, messages: sent };
         stats = {
           promptTokens: res.promptEvalCount,
           evalTokens: res.evalCount,
@@ -174,19 +199,116 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     this.abort?.abort();
   }
 
+  /** Summarizes the conversation on the user's request, between turns. */
+  async compactNow(): Promise<void> {
+    if (this.abort) return;
+    const ctrl = new AbortController();
+    this.abort = ctrl;
+    try {
+      await this.compact(false, ctrl.signal, await this.contextLimit());
+    } catch (err) {
+      this.send({ type: 'compact', phase: 'failed', auto: false, message: ctrl.signal.aborted ? '中断しました' : describeError(err) });
+    } finally {
+      this.abort = undefined;
+    }
+  }
+
   // -------------------------------------------------------------------------------------------
 
-  private async callModel(signal: AbortSignal): Promise<ChatResult> {
-    const { model, numCtx, permissionMode } = this.config;
+  /** Everything but the messages is the same in every request, so Ollama can reuse its cache (summaries included). */
+  private request(messages: OllamaMessage[]): ChatRequest {
+    const { model, numCtx } = this.config;
     const req: ChatRequest = {
       model,
-      messages: [{ role: 'system', content: this.systemPrompt }, ...this.messages],
-      ...(this.tools && { tools: toolSchemas(permissionMode === 'plan') }),
+      messages: [{ role: 'system', content: this.systemPrompt }, ...messages],
+      ...(this.tools && { tools: this.toolDefs() }),
       options: { ...(numCtx && { num_ctx: numCtx }), num_predict: MAX_OUTPUT_TOKENS },
     };
     const think = thinkParam(this.config.think, this.config.capabilities);
     if (think !== undefined) req.think = think;
+    return req;
+  }
 
+  private toolDefs(): OllamaTool[] | undefined {
+    return this.tools ? toolSchemas(this.config.permissionMode === 'plan') : undefined;
+  }
+
+  /**
+   * The context window to plan for: the smaller of the requested `num_ctx` and the loaded model's
+   * (Ollama keeps using a model loaded with a larger window).
+   */
+  private async contextLimit(): Promise<number | undefined> {
+    const loaded = await this.deps.contextLength?.(this.config.model).catch(() => undefined);
+    const limits = [this.config.numCtx, loaded].filter((n): n is number => !!n && n > 0);
+    return limits.length ? Math.min(...limits) : undefined;
+  }
+
+  /** Estimated prompt tokens of the next request: Ollama's count for the last call plus what was added since. */
+  private promptEstimate(): number {
+    const b = this.baseline;
+    if (b && b.messages <= this.messages.length) return b.tokens + messagesTokens(this.messages.slice(b.messages));
+    return requestTokens(this.systemPrompt, this.toolDefs(), this.messages);
+  }
+
+  private async compactIfFull(signal: AbortSignal) {
+    const limit = await this.contextLimit();
+    if (limit && this.promptEstimate() >= limit * COMPACT_AT) await this.compact(true, signal, limit);
+  }
+
+  /**
+   * Replaces the older messages with a summary the model writes, keeping the newest ones as they are.
+   * If the summary fails, that is reported and the conversation stays as it was; an interrupt is thrown.
+   */
+  private async compact(auto: boolean, signal: AbortSignal, limit: number | undefined) {
+    const before = this.promptEstimate();
+    const overhead = requestTokens(this.systemPrompt, this.toolDefs(), []);
+    const cut = splitPoint(this.messages, keepBudget(limit ?? Infinity, overhead, messagesTokens(this.messages), !auto));
+    if (cut === 0) {
+      if (!auto) this.send({ type: 'compact', phase: 'failed', auto, message: '要約できるほどの会話がまだありません' });
+      return;
+    }
+    this.send({ type: 'compact', phase: 'start', auto });
+    const toSummarize = this.messages.slice(0, cut);
+    const kept = this.messages.slice(cut);
+    let summary = '';
+    try {
+      // Leave the rest of the window for the summary (and any thinking before it).
+      const window = (limit ?? Infinity) * COMPACT_AT;
+      if (messagesTokens(toSummarize) <= window - overhead) {
+        // Shaped like the real requests, so Ollama reuses the cached conversation.
+        summary = await this.summarize(this.request([...toSummarize, { role: 'user', content: SUMMARY_PROMPT }]), signal);
+      } else {
+        const pieces = transcriptPieces(toSummarize, window - PIECE_OVERHEAD);
+        for (const [i, piece] of pieces.entries()) {
+          // A plain text task without the system prompt or tools, which leaves more room for the piece.
+          const messages: OllamaMessage[] = [{ role: 'user', content: piecePrompt(summary, piece, i, pieces.length) }];
+          summary = await this.summarize({ ...this.request([]), messages, tools: undefined }, signal);
+        }
+      }
+    } catch (err) {
+      if (signal.aborted) throw new Interrupted();
+      this.send({ type: 'compact', phase: 'failed', auto, message: describeError(err) });
+      return;
+    }
+
+    const promptKept = kept.some((m) => m.role === 'user' && m.content === this.lastPrompt);
+    this.messages.splice(0, this.messages.length, ...summaryMessages(summary, promptKept ? undefined : this.lastPrompt, kept[0]?.role), ...kept);
+    // The model no longer sees what it read, so Edit and overwriting need a fresh Read again.
+    this.readFiles.clear();
+    this.baseline = undefined;
+    const after = this.promptEstimate();
+    this.persist({ type: 'compact', messages: [...this.messages], summary, auto, tokensBefore: before, tokensAfter: after, timestamp: new Date().toISOString() });
+    this.send({ type: 'compact', phase: 'done', auto, summary, tokensBefore: before, tokensAfter: after });
+  }
+
+  private async summarize(req: ChatRequest, signal: AbortSignal): Promise<string> {
+    const summary = cleanSummary((await this.deps.chat(req, signal, {})).content);
+    if (!summary) throw new Error('モデルが要約を返しませんでした');
+    return summary;
+  }
+
+  private async callModel(signal: AbortSignal): Promise<ChatResult> {
+    const req = this.request(this.messages);
     const partial = { text: '', thinking: '' };
     try {
       return await this.deps.chat(req, signal, {
@@ -330,6 +452,11 @@ export function thinkParam(setting: ThinkSetting, capabilities: string[]): ChatR
     default:
       return undefined;
   }
+}
+
+/** Messages the harness wrote to the model in the user role, as opposed to the user's own prompts. */
+function isHarnessMessage(content: string): boolean {
+  return content === CUT_OFF || content.startsWith(SUMMARY_HEADER);
 }
 
 /**

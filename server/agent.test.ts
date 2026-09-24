@@ -5,7 +5,8 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import type { AgentEvent, PermissionMode } from '../shared/protocol.js';
 import { AgentSession, MAX_OUTPUT_TOKENS, thinkParam, type AgentDeps } from './agent.js';
-import type { ChatFn, ChatRequest, ChatResult, OllamaToolCall } from './ollama.js';
+import { SUMMARY_HEADER, SUMMARY_PROMPT } from './compact.js';
+import type { ChatFn, ChatRequest, ChatResult, OllamaMessage, OllamaToolCall } from './ollama.js';
 import { SessionStore, toEvents, toMessages } from './store.js';
 
 const roots: string[] = [];
@@ -42,11 +43,33 @@ function scripted(...replies: ChatResult[]) {
   return { chat, requests };
 }
 
-function session(chat: ChatFn, opts: { cwd: string; mode?: PermissionMode; auto?: boolean; store?: SessionStore; caps?: string[] }) {
+function session(
+  chat: ChatFn,
+  opts: {
+    cwd: string;
+    mode?: PermissionMode;
+    auto?: boolean;
+    store?: SessionStore;
+    caps?: string[];
+    numCtx?: number;
+    /** Context window of the "loaded" model. */
+    loadedCtx?: number;
+    history?: OllamaMessage[];
+  },
+) {
   const events: AgentEvent[] = [];
-  const deps: AgentDeps = { chat, store: opts.store, autoApprove: () => !!opts.auto, contextLength: async () => 4096 };
+  const deps: AgentDeps = { chat, store: opts.store, autoApprove: () => !!opts.auto, contextLength: async () => opts.loadedCtx ?? 4096 };
   const s = new AgentSession(
-    { sessionId: SESSION, cwd: opts.cwd, model: 'test', think: '', permissionMode: opts.mode ?? 'default', capabilities: opts.caps ?? ['completion', 'tools'] },
+    {
+      sessionId: SESSION,
+      cwd: opts.cwd,
+      model: 'test',
+      think: '',
+      numCtx: opts.numCtx,
+      permissionMode: opts.mode ?? 'default',
+      capabilities: opts.caps ?? ['completion', 'tools'],
+      history: opts.history,
+    },
     deps,
   );
   s.on('event', (ev) => {
@@ -259,6 +282,107 @@ test('a cut-off reply that still holds a whole tool call runs it instead of retr
   assert.ok(!events.some((e) => e.type === 'notice'));
   assert.deepEqual(requests[1].messages.slice(-2).map((m) => m.role), ['assistant', 'tool']);
   assert.equal(last(events, 'result')!.message, undefined);
+});
+
+/** A file whose Read result alone fills most of an 8K window (one token per Japanese character). */
+function bigFile(cwd: string) {
+  writeFileSync(path.join(cwd, 'big.txt'), Array.from({ length: 100 }, () => 'あ'.repeat(70)).join('\n'));
+}
+
+test('near the context limit, older messages are summarized before the next model call', async () => {
+  const cwd = tmp();
+  bigFile(cwd);
+  const store = new SessionStore(tmp());
+  const { chat, requests } = scripted(
+    reply('', [call('call_1', 'Read', { file_path: 'big.txt' })]),
+    reply('SUMMARY 1'),
+    reply('SUMMARY TEXT'),
+    reply('', [call('call_2', 'Edit', { file_path: 'big.txt', old_string: 'あ', new_string: 'い' })]),
+    reply('done'),
+  );
+  const { s, events } = session(chat, { cwd, store, numCtx: 8192, loadedCtx: 8192 });
+  await s.sendUser('big.txt を読んで直して');
+
+  // Too big to summarize in one request: summarized in two pieces, the second carrying the first summary,
+  // with the whole file across them. Same options, but no system prompt or tools.
+  const [p1, p2] = [requests[1], requests[2]];
+  for (const p of [p1, p2]) {
+    assert.equal(p.messages.length, 1);
+    assert.equal(p.tools, undefined);
+    assert.equal(p.options?.num_ctx, 8192);
+  }
+  assert.match(p1.messages[0].content, /Part 1 of 2/);
+  assert.match(p2.messages[0].content, /Summary of the earlier parts:\nSUMMARY 1/);
+  const chars = (p1.messages[0].content + p2.messages[0].content).split('あ').length - 1;
+  assert.ok(chars >= 7000, `the whole file is summarized (${chars})`);
+
+  // The next call sees the summary, with the latest request word for word, instead of the old messages.
+  const next = requests[3].messages;
+  assert.equal(next.length, 2);
+  assert.ok(next[1].content.startsWith(SUMMARY_HEADER));
+  assert.match(next[1].content, /SUMMARY TEXT/);
+  assert.match(next[1].content, /big\.txt を読んで直して/);
+
+  const done = last(events, 'compact')!;
+  assert.equal(done.phase, 'done');
+  assert.equal(done.auto, true);
+  assert.ok(done.tokensAfter! < done.tokensBefore!);
+  // The model no longer sees the file, so editing needs a fresh Read.
+  assert.match(events.filter((e) => e.type === 'toolResult').at(-1)!.output, /Read .* first/);
+  assert.equal(last(events, 'result')!.subtype, 'success');
+
+  // Resuming continues from the summary; the history still shows everything.
+  const records = (await store.load(SESSION))!;
+  assert.deepEqual(toMessages(records).map((m) => m.role), ['user', 'assistant', 'tool', 'assistant']);
+  assert.ok(toMessages(records)[0].content.startsWith(SUMMARY_HEADER));
+  const types = toEvents(records).events.map((e) => e.type);
+  assert.deepEqual(types, ['user', 'assistant', 'toolResult', 'compact', 'assistant', 'toolResult', 'assistant', 'result']);
+});
+
+test('if the summary fails, the turn goes on with the conversation unchanged', async () => {
+  const cwd = tmp();
+  bigFile(cwd);
+  const { chat, requests } = scripted(reply('', [call('call_1', 'Read', { file_path: 'big.txt' })]), reply(''), reply('done'));
+  const { s, events } = session(chat, { cwd, numCtx: 8192, loadedCtx: 8192 });
+  await s.sendUser('read big.txt');
+  assert.equal(last(events, 'compact')!.phase, 'failed');
+  assert.deepEqual(requests[2].messages.map((m) => m.role), ['system', 'user', 'assistant', 'tool']);
+  assert.equal(last(events, 'result')!.subtype, 'success');
+});
+
+test('compacting on request summarizes all but the latest exchange', async () => {
+  const turn = (i: number): OllamaMessage[] => [
+    { role: 'user', content: `依頼${i} ${'あ'.repeat(400)}` },
+    { role: 'assistant', content: `回答${i} ${'い'.repeat(400)}` },
+  ];
+  const history = [...turn(1), ...turn(2), ...turn(3)];
+  const { chat, requests } = scripted(reply('SUMMARY'), reply('ok'));
+  const { s, events } = session(chat, { cwd: tmp(), numCtx: 32768, loadedCtx: 32768, history });
+  await s.compactNow();
+
+  // It fits in one request shaped like the conversation (same tools), so Ollama can reuse its cache.
+  assert.deepEqual(requests[0].messages.slice(1, -1), history.slice(0, 5), 'everything before the last reply is summarized');
+  assert.deepEqual(requests[0].messages.at(-1), { role: 'user', content: SUMMARY_PROMPT });
+  assert.ok(requests[0].tools?.length);
+  assert.deepEqual(events.filter((e) => e.type === 'compact').map((e) => e.type === 'compact' && e.phase), ['start', 'done']);
+  assert.equal(last(events, 'compact')!.auto, false);
+  assert.equal(s.busy, false);
+
+  await s.sendUser('次へ');
+  const msgs = requests[1].messages;
+  assert.deepEqual(msgs.map((m) => m.role), ['system', 'user', 'assistant', 'user']);
+  assert.match(msgs[1].content, /依頼3/, 'the summarized latest request is repeated');
+  assert.equal(msgs[2].content, history[5].content);
+});
+
+test('compacting on request with nothing to summarize reports it', async () => {
+  const { chat, requests } = scripted();
+  const { s, events } = session(chat, { cwd: tmp() });
+  await s.compactNow();
+  assert.equal(requests.length, 0);
+  const ev = last(events, 'compact')!;
+  assert.equal(ev.phase, 'failed');
+  assert.match(ev.message ?? '', /まだありません/);
 });
 
 test('without the tools capability no tools are sent', async () => {

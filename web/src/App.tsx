@@ -313,7 +313,7 @@ export function App() {
           <div className="hint">ブラウザで通知がブロックされています。アドレスバーのサイト設定から許可してください。</div>
         )}
 
-        <SessionPanel tab={tab} />
+        <SessionPanel tab={tab} onCompact={() => send({ type: 'compact', key: tab.key })} />
         <SessionHistory
           state={state}
           cwd={cwd}

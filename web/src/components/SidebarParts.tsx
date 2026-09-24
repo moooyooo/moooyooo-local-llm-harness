@@ -4,9 +4,10 @@ import { formatBytes, formatTokens } from '../util';
 
 const THINK_LABEL: Record<string, string> = { '': '既定', on: 'オン', off: 'オフ', low: 'low', medium: 'medium', high: 'high' };
 
-export function SessionPanel({ tab }: { tab: Tab }) {
+export function SessionPanel({ tab, onCompact }: { tab: Tab; onCompact: () => void }) {
   const s = tab.session;
   const stats = tab.stats;
+  const canCompact = tab.running && !tab.busy && tab.items.some((it) => it.kind === 'user');
   return (
     <div className="session">
       {s ? (
@@ -32,13 +33,23 @@ export function SessionPanel({ tab }: { tab: Tab }) {
               label="コンテキスト"
               value={stats.contextUsed / stats.contextMax}
               text={`${formatTokens(stats.contextUsed)} / ${formatTokens(stats.contextMax)}`}
-              title="最後のモデル呼び出しで使ったトークン数。100% に近づくと古い内容から切り捨てられます"
+              title="最後のモデル呼び出しで使ったトークン数。80% を超えそうになると、古いやり取りを自動で要約します"
             />
           ) : (
             <div><span>コンテキスト</span><code>{stats.contextUsed.toLocaleString()} tok</code></div>
           )}
           {stats.tokensPerSec != null && <div><span>生成速度</span><code>{stats.tokensPerSec.toFixed(1)} tok/s</code></div>}
         </>
+      )}
+      {s && (
+        <button
+          className="small"
+          disabled={!canCompact}
+          onClick={onCompact}
+          title="古いやり取りをモデルに要約させて、コンテキストを空けます。直近のやり取りはそのまま残ります"
+        >
+          会話を要約
+        </button>
       )}
     </div>
   );

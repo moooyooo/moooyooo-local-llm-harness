@@ -165,6 +165,13 @@ wss.on('connection', (ws: WebSocket) => {
       case 'permission':
         sessions.get(msg.key)?.respondPermission(msg.requestId, !!msg.allow, msg.message);
         break;
+      case 'compact': {
+        const s = sessions.get(msg.key);
+        if (!s) return send({ type: 'error', key: msg.key, message: 'セッションが開始されていません' });
+        if (s.busy) return send({ type: 'error', key: msg.key, message: '応答中です。終わってから要約してください' });
+        s.compactNow().catch((err) => send({ type: 'error', key: msg.key, message: String(err) }));
+        break;
+      }
       case 'interrupt':
         sessions.get(msg.key)?.interrupt();
         break;

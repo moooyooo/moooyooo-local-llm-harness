@@ -17,6 +17,11 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
   Every tool call always gets a `tool` message, even when interrupted, so the conversation stays valid.
   Each model call is capped at `MAX_OUTPUT_TOKENS`; a reply cut off there is retried once with a request for smaller steps
   (a `message` record with `notice`, shown in the GUI as a notice instead of a user prompt).
+- `server/compact.ts`: context compaction. Before each model call the prompt size is estimated (Ollama's `prompt_eval_count`
+  for the last call, which counts cached tokens too, plus estimates for messages added since); at `COMPACT_AT` of the window
+  (the smaller of `num_ctx` and the loaded model's) older messages are replaced by a summary the model writes in a request
+  shaped like the real ones (same tools and options, so the KV cache is reused). The latest user prompt is repeated word for
+  word, and `readFiles` is cleared so edits need a fresh Read. Also on demand (`compact` client message).
   The system prompt is built once per session so Ollama can reuse its KV cache.
 - `server/ollama.ts`: REST client. Verified against Ollama 0.32: tool calls arrive whole (with an `id`) in one streamed chunk,
   and nothing is streamed while one is generated (minutes for a large Write), so `chat` uses `node:http` without a timeout
@@ -32,8 +37,9 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 - `server/autoApprove.ts`, `server/shellParse.ts`, `server/secretScan.ts`: taken from custom-harnes. Policy: allowlist only.
   When you change the rules, add cases to `server/autoApprove.test.ts`, and never loosen a rule without a test.
   Test fixtures must build fake secrets by string concatenation.
-- `server/store.ts`: sessions as `<HARNESS_DATA_DIR>/sessions/<uuid>.jsonl` (`meta` / `message` / `result` records).
-  `message` records are exactly what was sent to Ollama, so resuming replays them as-is; `toEvents` turns them into GUI events.
+- `server/store.ts`: sessions as `<HARNESS_DATA_DIR>/sessions/<uuid>.jsonl` (`meta` / `message` / `result` / `compact` records).
+  `message` records are exactly what was sent to Ollama, so resuming replays them as-is; a `compact` record holds the whole
+  conversation after compaction and replaces everything before it. `toEvents` turns records into GUI events (full history).
 - `server/systemPrompt.ts`: environment, working rules, plan-mode rules, and the working folder's `AGENTS.md` / `CLAUDE.md`.
 - `shared/protocol.ts`: browser⇄server messages. Session-scoped messages carry `key`, a client-generated tab ID.
   Agent progress is `{type:'event', key, ev: AgentEvent}`; a resumed session's past turns come as `history` with the same event shapes.

@@ -27,14 +27,15 @@ export function Transcript({ tab, onPermission, onSend }: {
 
   const streaming = !!(tab.streamText || tab.streamThinking);
   const waiting = tab.busy && pendingPermissions(tab).length === 0;
-  // Offer to continue when the latest turn stopped early and nothing was sent since (history notices may follow).
+  // Offer to continue when the latest turn stopped early and nothing was sent since (history notices or a
+  // compaction may follow).
   const lastResult = tab.items.findLastIndex((it) => it.kind === 'result');
   const canContinue =
     tab.running &&
     !tab.busy &&
     lastResult >= 0 &&
     (tab.items[lastResult] as Extract<Item, { kind: 'result' }>).unfinished &&
-    tab.items.slice(lastResult + 1).every((it) => it.kind === 'notice');
+    tab.items.slice(lastResult + 1).every((it) => it.kind === 'notice' || it.kind === 'compact');
   return (
     <div className="transcript">
       {tab.items.length === 0 && !streaming && (
@@ -57,7 +58,7 @@ export function Transcript({ tab, onPermission, onSend }: {
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{tab.streamText}</ReactMarkdown>
         </div>
       )}
-      {waiting && <Waiting since={tab.lastActivity ?? Date.now()} streaming={streaming} />}
+      {waiting && <Waiting since={tab.lastActivity ?? Date.now()} streaming={streaming} compacting={!!tab.compacting} />}
       {canContinue && (
         <div className="continue">
           <button className="primary" title={CONTINUE_PROMPT} onClick={() => onSend(CONTINUE_PROMPT)}>続きから再開</button>
@@ -70,7 +71,7 @@ export function Transcript({ tab, onPermission, onSend }: {
 }
 
 /** Ollama streams nothing while the model writes a tool call, so show how long it has been quiet. */
-function Waiting({ since, streaming }: { since: number; streaming: boolean }) {
+function Waiting({ since, streaming, compacting }: { since: number; streaming: boolean; compacting: boolean }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -80,9 +81,9 @@ function Waiting({ since, streaming }: { since: number; streaming: boolean }) {
   if (streaming && quiet < QUIET_SHOW) return null;
   return (
     <div className="thinking-dots">
-      考え中…
+      {compacting ? 'コンテキストを空けるため、会話を要約しています…' : '考え中…'}
       {quiet >= QUIET_SHOW && <span title="最後の出力からの経過時間"> {formatDuration(quiet)}</span>}
-      {quiet >= QUIET_HINT && (
+      {quiet >= QUIET_HINT && !compacting && (
         <div className="hint-muted">
           ファイルの中身などを含むツール呼び出しは、書き終わるまで何も表示されません。長すぎる場合は「中断」して、小さく分けるよう指示してください。
         </div>
@@ -130,6 +131,20 @@ function ItemView({ item, onPermission }: { item: Item; onPermission: Permission
       );
     case 'notice':
       return <div className={`notice ${item.level}`}>{item.text}</div>;
+    case 'compact':
+      return (
+        <details className="compaction">
+          <summary>
+            会話を要約しました（{item.auto ? 'コンテキストが一杯に近づいたため自動' : '手動'}
+            {item.tokensBefore != null && item.tokensAfter != null &&
+              `・約 ${item.tokensBefore.toLocaleString()} → ${item.tokensAfter.toLocaleString()} トークン`}
+            ）
+          </summary>
+          <div className="compaction-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.summary}</ReactMarkdown>
+          </div>
+        </details>
+      );
   }
 }
 
