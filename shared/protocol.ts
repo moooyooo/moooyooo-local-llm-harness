@@ -11,16 +11,24 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermiss
 /** Ollama's `think`: '' = model default, on/off = true/false, levels for models that support them (e.g. gpt-oss). */
 export type ThinkSetting = '' | 'on' | 'off' | 'low' | 'medium' | 'high';
 
-export interface StartOptions {
-  cwd: string;
+/** Settings chosen when a session starts, and changeable between turns. */
+export interface SessionSettings {
   model: string;
   think?: ThinkSetting;
   /** Ollama `num_ctx`. Omitted = Ollama's default for the model. */
   numCtx?: number;
   permissionMode?: PermissionMode;
+}
+
+export interface StartOptions extends SessionSettings {
+  cwd: string;
   /** Session ID to resume. */
   resume?: string;
 }
+
+/** Images per message, and the largest accepted image (base64 characters). */
+export const MAX_IMAGES = 8;
+export const MAX_IMAGE_BASE64 = 16 * 1024 * 1024;
 
 /**
  * One connection can run several sessions (GUI tabs). Session-scoped messages carry `key`,
@@ -28,7 +36,10 @@ export interface StartOptions {
  */
 export type ClientMessage =
   | { type: 'start'; key: string; options: StartOptions }
-  | { type: 'user'; key: string; text: string }
+  /** `images`: PNG / JPEG as plain base64 (Ollama rejects a `data:` prefix), for models with the `vision` capability. */
+  | { type: 'user'; key: string; text: string; images?: string[] }
+  /** New settings for a started session, used from the next message. */
+  | { type: 'configure'; key: string; options: SessionSettings }
   | { type: 'permission'; key: string; requestId: string; allow: boolean; message?: string }
   | { type: 'interrupt'; key: string }
   | { type: 'stop'; key: string }
@@ -99,8 +110,8 @@ export type AgentEvent =
   | { type: 'init'; sessionId: string; model: string; cwd: string; permissionMode: PermissionMode; think: ThinkSetting; numCtx?: number; tools: boolean }
   /** Streamed text / thinking of the assistant message being generated. */
   | { type: 'delta'; channel: 'text' | 'thinking'; text: string }
-  /** The user's prompt (only replayed from history; the GUI shows live prompts itself). */
-  | { type: 'user'; text: string }
+  /** The user's prompt (only replayed from history; the GUI shows live prompts itself). `images` as in `ClientMessage`. */
+  | { type: 'user'; text: string; images?: string[] }
   /** The harness sent the model a message on its own (e.g. asking to retry a cut-off reply in smaller steps). */
   | { type: 'notice'; text: string }
   /**

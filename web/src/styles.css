@@ -257,6 +257,20 @@ pre.diff .ctx { color: var(--muted); }
 .thinking-dots .hint-muted { margin-top: 2px; }
 .continue { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
 
-.composer { display: flex; gap: 8px; padding: 12px max(16px, calc((100% - 860px) / 2)); border-top: 1px solid var(--border); background: var(--panel); }
+.composer { display: flex; flex-direction: column; gap: 6px; padding: 12px max(16px, calc((100% - 860px) / 2)); border-top: 1px solid var(--border); background: var(--panel); }
+.composer-row { display: flex; gap: 8px; }
 .composer textarea { resize: vertical; min-height: 44px; max-height: 40vh; }
-.composer button { align-self: flex-end; flex-shrink: 0; white-space: nowrap; }
+.composer-row button { align-self: flex-end; flex-shrink: 0; white-space: nowrap; }
+.composer-row button.attach { padding: 6px 10px; }
+.composer-note { font-size: 12px; color: var(--ng); }
+.attachments { display: flex; gap: 8px; flex-wrap: wrap; }
+.attachment { position: relative; }
+.attachment img { height: 64px; max-width: 160px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); display: block; }
+.attachment .remove {
+  position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border-radius: 50%;
+  font-size: 12px; line-height: 18px; background: var(--panel);
+}
+.thumbs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.thumbs img { max-height: 120px; max-width: 200px; border-radius: 6px; cursor: zoom-in; display: block; }
+.thumbs img.open { max-height: none; max-width: 100%; cursor: zoom-out; }
+.main.dragging { outline: 2px dashed var(--accent); outline-offset: -6px; }

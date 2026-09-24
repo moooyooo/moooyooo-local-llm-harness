@@ -19,7 +19,7 @@ import type { ChatFn, ChatRequest, ChatResult, OllamaMessage, OllamaTool } from 
 import { describeError } from './ollama.js';
 import { assess, gate } from './permissions.js';
 import type { SessionRecord, SessionStore } from './store.js';
-import { parseArguments, toToolCalls } from './store.js';
+import { describeSettingsChange, parseArguments, toToolCalls } from './store.js';
 import { buildSystemPrompt } from './systemPrompt.js';
 import { runTool, toolSchemas, validateTool } from './tools.js';
 
@@ -75,8 +75,9 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   readonly config: AgentConfig;
   private readonly deps: AgentDeps;
   private readonly messages: OllamaMessage[];
-  private readonly systemPrompt: string;
-  private readonly tools: boolean;
+  /** Rebuilt only when the settings change, so Ollama can keep reusing its KV cache. */
+  private systemPrompt: string;
+  private tools: boolean;
   private readonly readFiles = new Set<string>();
   private readonly pending = new Map<string, (answer: { allow: boolean; message?: string }) => void>();
   private abort?: AbortController;
@@ -108,7 +109,8 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     this.send({ type: 'init', sessionId, model, cwd, permissionMode, think, numCtx, tools: this.tools });
   }
 
-  async sendUser(text: string): Promise<void> {
+  /** `images`: base64 PNG / JPEG, for models with the `vision` capability. */
+  async sendUser(text: string, images?: string[]): Promise<void> {
     if (this.abort) return;
     const ctrl = new AbortController();
     this.abort = ctrl;
@@ -119,7 +121,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     let cutOffRetried = false;
     this.lastCall = { sig: '', count: 0 };
     this.lastPrompt = text;
-    this.push({ role: 'user', content: text });
+    this.push({ role: 'user', content: text, ...(images?.length && { images }) });
 
     try {
       for (;;) {
@@ -213,11 +215,31 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     }
   }
 
+  /**
+   * Applies new settings from the next model call (not during a turn). A model or context change makes Ollama
+   * reload the model; any change rebuilds the system prompt.
+   */
+  configure(next: Pick<AgentConfig, 'model' | 'think' | 'numCtx' | 'permissionMode' | 'capabilities'>): boolean {
+    if (this.abort) return false;
+    const change = describeSettingsChange({ ...this.config, numCtx: this.config.numCtx ?? 0 }, { ...next, numCtx: next.numCtx ?? 0 });
+    if (!change) return true;
+    Object.assign(this.config, next);
+    this.tools = next.capabilities.includes('tools');
+    this.systemPrompt = buildSystemPrompt({ cwd: this.config.cwd, permissionMode: next.permissionMode, tools: this.tools });
+    this.baseline = undefined;
+    if (this.metaWritten) this.writeMeta();
+    this.init();
+    this.send({ type: 'notice', text: change });
+    return true;
+  }
+
   // -------------------------------------------------------------------------------------------
 
   /** Everything but the messages is the same in every request, so Ollama can reuse its cache (summaries included). */
   private request(messages: OllamaMessage[]): ChatRequest {
     const { model, numCtx } = this.config;
+    // Ollama rejects images for a model without vision (e.g. after switching models), so leave a note instead.
+    if (!this.config.capabilities.includes('vision')) messages = messages.map(withoutImages);
     const req: ChatRequest = {
       model,
       messages: [{ role: 'system', content: this.systemPrompt }, ...messages],
@@ -424,12 +446,17 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   private persist(record: SessionRecord) {
     const { store } = this.deps;
     if (!store) return;
-    const { sessionId, cwd, model } = this.config;
-    if (!this.metaWritten) {
-      this.metaWritten = true;
-      store.append(sessionId, { type: 'meta', sessionId, cwd, model, timestamp: new Date().toISOString() });
-    }
-    store.append(sessionId, record);
+    if (!this.metaWritten) this.writeMeta();
+    store.append(this.config.sessionId, record);
+  }
+
+  /** Records the settings: before the session's first record, and again whenever they change. */
+  private writeMeta() {
+    const { store } = this.deps;
+    if (!store) return;
+    this.metaWritten = true;
+    const { sessionId, cwd, model, think, numCtx, permissionMode } = this.config;
+    store.append(sessionId, { type: 'meta', sessionId, cwd, model, think, numCtx: numCtx ?? 0, permissionMode, timestamp: new Date().toISOString() });
   }
 
   private send(ev: AgentEvent) {
@@ -452,6 +479,12 @@ export function thinkParam(setting: ThinkSetting, capabilities: string[]): ChatR
     default:
       return undefined;
   }
+}
+
+function withoutImages(m: OllamaMessage): OllamaMessage {
+  if (m.role !== 'user' || !m.images?.length) return m;
+  const { images, ...rest } = m;
+  return { ...rest, content: `${m.content}\n\n(${images.length} image(s) were attached here, but this model cannot see images.)` };
 }
 
 /** Messages the harness wrote to the model in the user role, as opposed to the user's own prompts. */

@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentEvent, FolderSummary, SessionSummary, ToolCall } from '../shared/protocol.js';
+import type { AgentEvent, FolderSummary, PermissionMode, SessionSummary, ThinkSetting, ToolCall } from '../shared/protocol.js';
 import type { OllamaMessage } from './ollama.js';
 
 /**
@@ -16,9 +16,20 @@ const HISTORY_LIMIT = 600;
 
 type ResultEvent = Extract<AgentEvent, { type: 'result' }>;
 
+/** Session settings as recorded in `meta` records. `numCtx` 0 = Ollama's default. */
+export interface RecordedSettings {
+  model: string;
+  think: ThinkSetting;
+  numCtx: number;
+  permissionMode: PermissionMode;
+}
+
 export type SessionRecord =
-  /** Written when a session is first used and whenever it is resumed (the model may differ). */
-  | { type: 'meta'; sessionId: string; cwd: string; model: string; timestamp: string }
+  /**
+   * Written when a session is first used, whenever it is resumed, and when its settings change.
+   * Records from before settings could change have only `model`.
+   */
+  | ({ type: 'meta'; sessionId: string; cwd: string; timestamp: string } & Pick<RecordedSettings, 'model'> & Partial<RecordedSettings>)
   /** `notice`: the harness wrote this message itself; the GUI shows the notice instead of the message. */
   | { type: 'message'; message: OllamaMessage; isError?: boolean; notice?: string; timestamp: string }
   | { type: 'result'; result: ResultEvent; timestamp: string }
@@ -139,10 +150,34 @@ export function toMessages(records: SessionRecord[]): OllamaMessage[] {
   return messages;
 }
 
+const THINK_LABEL: Record<ThinkSetting, string> = { '': '既定', on: 'オン', off: 'オフ', low: 'low', medium: 'medium', high: 'high' };
+
+/** What changed between two sets of settings, for the transcript; undefined when nothing did. */
+export function describeSettingsChange(prev: Partial<RecordedSettings>, next: Partial<RecordedSettings>): string | undefined {
+  const ctx = (n?: number) => (n ? `${Math.round(n / 1024)}K` : '既定');
+  const changes: string[] = [];
+  if (prev.model !== next.model) changes.push(`モデル ${prev.model} → ${next.model}`);
+  if (prev.think !== next.think) changes.push(`思考 ${THINK_LABEL[prev.think ?? '']} → ${THINK_LABEL[next.think ?? '']}`);
+  if ((prev.numCtx || 0) !== (next.numCtx || 0)) changes.push(`コンテキスト長 ${ctx(prev.numCtx)} → ${ctx(next.numCtx)}`);
+  if (prev.permissionMode !== next.permissionMode) changes.push(`権限モード ${prev.permissionMode} → ${next.permissionMode}`);
+  return changes.length ? `設定を変更しました: ${changes.join('、')}` : undefined;
+}
+
 /** Past turns as GUI events, newest `HISTORY_LIMIT`. */
 export function toEvents(records: SessionRecord[]): { events: AgentEvent[]; omitted: number } {
   const events: AgentEvent[] = [];
+  let settings: Partial<RecordedSettings> | undefined;
   for (const r of records) {
+    if (r.type === 'meta') {
+      const next: Partial<RecordedSettings> = { model: r.model, think: r.think, numCtx: r.numCtx, permissionMode: r.permissionMode };
+      if (settings) {
+        // Older records hold only the model, so compare the rest only when both records have it.
+        const full = !!(settings.permissionMode && next.permissionMode);
+        const change = describeSettingsChange(full ? settings : { model: settings.model }, full ? next : { model: next.model });
+        if (change) events.push({ type: 'notice', text: change });
+      }
+      settings = next;
+    }
     if (r.type === 'result') events.push(r.result);
     if (r.type === 'compact') {
       const { summary, auto, tokensBefore, tokensAfter } = r;
@@ -151,7 +186,7 @@ export function toEvents(records: SessionRecord[]): { events: AgentEvent[]; omit
     if (r.type !== 'message') continue;
     const m = r.message;
     if (r.notice) events.push({ type: 'notice', text: r.notice });
-    else if (m.role === 'user') events.push({ type: 'user', text: m.content });
+    else if (m.role === 'user') events.push({ type: 'user', text: m.content, ...(m.images?.length && { images: m.images }) });
     else if (m.role === 'assistant') events.push({ type: 'assistant', text: m.content, thinking: m.thinking, toolCalls: toToolCalls(m.tool_calls) });
     else if (m.role === 'tool') events.push({ type: 'toolResult', id: m.tool_call_id ?? '', output: m.content, isError: !!r.isError });
   }

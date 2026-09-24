@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { SecurityScan, TurnStats } from '../../../shared/protocol';
+import { imageFiles, type Attachment } from '../images';
 import { pendingPermissions, type Item, type PermissionItem, type Tab } from '../state';
 import { formatDuration, formatTokens, lineDiff, summarizeInput, truncate } from '../util';
 
@@ -95,7 +96,12 @@ function Waiting({ since, streaming, compacting }: { since: number; streaming: b
 function ItemView({ item, onPermission }: { item: Item; onPermission: PermissionHandler }) {
   switch (item.kind) {
     case 'user':
-      return <div className="msg user">{item.text}</div>;
+      return (
+        <div className="msg user">
+          {item.text}
+          {item.images && <Thumbs images={item.images} />}
+        </div>
+      );
     case 'text':
       return (
         <div className="msg assistant">
@@ -279,19 +285,27 @@ function SecurityReport({ scan, compact }: { scan: SecurityScan; compact?: boole
   );
 }
 
-/** Controlled by the parent so each tab keeps its own unsent draft. */
-export function Composer({ text, setText, disabled, busy, onSend, onInterrupt }: {
+/** Controlled by the parent so each tab keeps its own unsent draft and images. */
+export function Composer({ text, setText, attachments, canAttach, note, disabled, busy, onSend, onAddImages, onRemoveImage, onInterrupt }: {
   text: string;
   setText: (text: string) => void;
+  attachments: Attachment[];
+  /** The model can read images. */
+  canAttach: boolean;
+  /** Why an image couldn't be attached. */
+  note?: string;
   disabled: boolean;
   busy: boolean;
   onSend: (text: string) => void;
+  onAddImages: (files: File[]) => void;
+  onRemoveImage: (id: string) => void;
   onInterrupt: () => void;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const canSend = !disabled && !busy && (!!text.trim() || attachments.length > 0);
   const submit = () => {
-    const t = text.trim();
-    if (!t || disabled || busy) return;
-    onSend(t);
+    if (!canSend) return;
+    onSend(text.trim());
     setText('');
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -301,20 +315,75 @@ export function Composer({ text, setText, disabled, busy, onSend, onInterrupt }:
       submit();
     }
   };
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = imageFiles(e.clipboardData.items);
+    // Some apps (e.g. spreadsheets) copy text and a picture of it together; paste the text then.
+    if (!files.length || e.clipboardData.types.includes('text/plain')) return;
+    e.preventDefault();
+    onAddImages(files);
+  };
+  const placeholder = disabled
+    ? 'セッションを開始してください'
+    : `メッセージ（Enterで送信 / Shift+Enterで改行${canAttach ? ' / 画像は貼り付け・ドロップでも添付' : ''}）`;
   return (
     <div className="composer">
-      <textarea
-        value={text}
-        disabled={disabled}
-        placeholder={disabled ? 'セッションを開始してください' : 'メッセージ（Enterで送信 / Shift+Enterで改行）'}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-      />
-      {busy ? (
-        <button onClick={onInterrupt}>中断</button>
-      ) : (
-        <button className="primary" disabled={disabled || !text.trim()} onClick={submit}>送信</button>
+      {attachments.length > 0 && (
+        <div className="attachments">
+          {attachments.map((a) => (
+            <div key={a.id} className="attachment">
+              <img src={a.dataUrl} alt="添付画像" />
+              <button className="remove" title="外す" onClick={() => onRemoveImage(a.id)}>×</button>
+            </div>
+          ))}
+        </div>
       )}
+      {note && <div className="composer-note">{note}</div>}
+      <div className="composer-row">
+        <button
+          className="attach"
+          disabled={disabled || !canAttach}
+          title={canAttach ? '画像を添付（貼り付け・ドロップでも可）' : 'このモデルは画像入力に対応していません'}
+          onClick={() => fileRef.current?.click()}
+        >
+          画像
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            onAddImages(imageFiles(e.target.files));
+            e.target.value = '';
+          }}
+        />
+        <textarea
+          value={text}
+          disabled={disabled}
+          placeholder={placeholder}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+        />
+        {busy ? (
+          <button onClick={onInterrupt}>中断</button>
+        ) : (
+          <button className="primary" disabled={!canSend} onClick={submit}>送信</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Images of a sent message; click one to see it larger. */
+function Thumbs({ images }: { images: string[] }) {
+  const [open, setOpen] = useState<number>();
+  return (
+    <div className="thumbs">
+      {images.map((src, i) => (
+        <img key={i} src={src} alt={`添付画像 ${i + 1}`} className={open === i ? 'open' : ''} onClick={() => setOpen(open === i ? undefined : i)} />
+      ))}
     </div>
   );
 }

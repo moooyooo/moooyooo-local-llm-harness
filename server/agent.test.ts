@@ -385,6 +385,60 @@ test('compacting on request with nothing to summarize reports it', async () => {
   assert.match(ev.message ?? '', /まだありません/);
 });
 
+test('images go to a vision model, and are replaced by a note for a model without vision', async () => {
+  const png = 'iVBORw0KGgo' + 'AAAA';
+  const { chat, requests } = scripted(reply('red'), reply('ok'));
+  // A 4K window would be compacted right away: an image is estimated at 2,500 tokens.
+  const { s } = session(chat, { cwd: tmp(), caps: ['completion', 'tools', 'vision'], loadedCtx: 32768 });
+  await s.sendUser('何色？', [png]);
+  assert.deepEqual(requests[0].messages[1], { role: 'user', content: '何色？', images: [png] });
+
+  s.configure({ model: 'text-only', think: '', permissionMode: 'default', capabilities: ['completion', 'tools'] });
+  await s.sendUser('続けて');
+  const earlier = requests[1].messages[1];
+  assert.equal(earlier.role === 'user' && earlier.images, undefined);
+  assert.match(earlier.content, /1 image\(s\) were attached here, but this model cannot see images/);
+});
+
+test('settings changed between turns apply from the next message', async () => {
+  const store = new SessionStore(tmp());
+  let release!: () => void;
+  const firstCall = new Promise<void>((r) => (release = r));
+  const { chat: inner, requests } = scripted(reply('first'), reply('second'));
+  const chat: ChatFn = async (req, signal, cb) => {
+    if (requests.length === 0) await firstCall;
+    return inner(req, signal, cb);
+  };
+  const { s, events } = session(chat, { cwd: tmp(), store });
+  const next = { model: 'other', think: 'off' as const, numCtx: 16384, permissionMode: 'plan' as const, capabilities: ['completion', 'tools', 'thinking'] };
+
+  const turn = s.sendUser('one');
+  assert.equal(s.configure(next), false, 'not during a turn');
+  release();
+  await turn;
+  assert.equal(s.configure(next), true);
+  assert.equal(last(events, 'init')!.model, 'other');
+  assert.match(last(events, 'notice')!.text, /モデル test → other、思考 既定 → オフ、コンテキスト長 既定 → 16K、権限モード default → plan/);
+  assert.equal(s.configure(next), true, 'no change');
+  assert.equal(events.filter((e) => e.type === 'notice').length, 1);
+
+  await s.sendUser('two');
+  const req = requests[1];
+  assert.equal(req.model, 'other');
+  assert.equal(req.think, false);
+  assert.equal(req.options?.num_ctx, 16384);
+  assert.deepEqual(req.tools?.map((t) => t.function.name).sort(), ['Glob', 'Grep', 'LS', 'Read']);
+  assert.match(req.messages[0].content, /# Plan mode/);
+  assert.deepEqual(req.messages.slice(1).map((m) => m.content), ['one', 'first', 'two'], 'the conversation goes on');
+
+  // The session list shows the new model, and the history notes the change.
+  const records = (await store.load(SESSION))!;
+  assert.equal((await store.list())[0].model, 'other');
+  const notices = toEvents(records).events.filter((e) => e.type === 'notice');
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].type === 'notice' ? notices[0].text : '', /モデル test → other/);
+});
+
 test('without the tools capability no tools are sent', async () => {
   const { chat, requests } = scripted(reply('hello'));
   const { s } = session(chat, { cwd: tmp(), caps: ['completion'] });

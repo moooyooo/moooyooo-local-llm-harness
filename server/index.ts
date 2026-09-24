@@ -6,8 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { DEV_SERVER_PORT, DEV_WEB_PORT, PROD_PORT } from '../shared/ports.js';
-import type { ClientMessage, PermissionMode, ServerMessage, ThinkSetting } from '../shared/protocol.js';
-import { AgentSession } from './agent.js';
+import { MAX_IMAGE_BASE64, MAX_IMAGES } from '../shared/protocol.js';
+import type { ClientMessage, PermissionMode, ServerMessage, SessionSettings, ThinkSetting } from '../shared/protocol.js';
+import { AgentSession, type AgentConfig } from './agent.js';
 import { chat, describeError, getStatus, listLoaded, listModels, modelCapabilities, OLLAMA_URL } from './ollama.js';
 import { DATA_DIR, listFolders, SessionStore, toEvents, toMessages } from './store.js';
 
@@ -29,6 +30,35 @@ const ALLOWED_ORIGINS = new Set(
 );
 
 const store = new SessionStore();
+
+/** Validated session settings plus the model's capabilities. Throws a message for the user. */
+async function resolveSettings(o: SessionSettings) {
+  if (!o.model) throw new Error('モデルを選んでください');
+  let capabilities: string[];
+  try {
+    capabilities = await modelCapabilities(o.model);
+  } catch (err) {
+    throw new Error(`モデル ${o.model} を使えません: ${describeError(err)}`);
+  }
+  return {
+    model: o.model,
+    think: THINK_SETTINGS.has(o.think ?? '') ? (o.think ?? '') : '',
+    numCtx: o.numCtx && o.numCtx > 0 ? Math.floor(o.numCtx) : undefined,
+    permissionMode: PERMISSION_MODES.has(o.permissionMode!) ? o.permissionMode! : 'default',
+    capabilities,
+  } satisfies Omit<AgentConfig, 'sessionId' | 'cwd'>;
+}
+
+/** Images from the client: plain base64, within the limits. Returns an error message, or undefined when valid. */
+function checkImages(images: unknown): string | undefined {
+  if (images === undefined) return;
+  if (!Array.isArray(images) || images.length > MAX_IMAGES) return `画像は 1 回に ${MAX_IMAGES} 枚までです`;
+  for (const img of images) {
+    if (typeof img !== 'string' || !img || img.length > MAX_IMAGE_BASE64 || !/^[A-Za-z0-9+/]+=*$/.test(img)) {
+      return '画像の形式が正しくないか、大きすぎます';
+    }
+  }
+}
 
 const app = express();
 if (!DEV && existsSync(DIST)) {
@@ -83,13 +113,11 @@ wss.on('connection', (ws: WebSocket) => {
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
       return send({ type: 'error', key, message: `作業フォルダが存在しません: ${cwd}` });
     }
-    if (!o.model) return send({ type: 'error', key, message: 'モデルを選んでください' });
-
-    let capabilities: string[];
+    let settings: Awaited<ReturnType<typeof resolveSettings>>;
     try {
-      capabilities = await modelCapabilities(o.model);
+      settings = await resolveSettings(o);
     } catch (err) {
-      return send({ type: 'error', key, message: `モデル ${o.model} を使えません: ${describeError(err)}` });
+      return send({ type: 'error', key, message: (err as Error).message });
     }
     const records = o.resume ? await store.load(o.resume) : undefined;
     if (o.resume && !records) return send({ type: 'error', key, message: `セッション履歴が見つかりません: ${o.resume}` });
@@ -104,11 +132,7 @@ wss.on('connection', (ws: WebSocket) => {
       {
         sessionId: o.resume ?? randomUUID(),
         cwd,
-        model: o.model,
-        think: THINK_SETTINGS.has(o.think ?? '') ? (o.think ?? '') : '',
-        numCtx: o.numCtx && o.numCtx > 0 ? Math.floor(o.numCtx) : undefined,
-        permissionMode: PERMISSION_MODES.has(o.permissionMode!) ? o.permissionMode! : 'default',
-        capabilities,
+        ...settings,
         history: records ? toMessages(records) : undefined,
       },
       {
@@ -158,8 +182,24 @@ wss.on('connection', (ws: WebSocket) => {
         const s = sessions.get(msg.key);
         if (!s) return send({ type: 'error', key: msg.key, message: 'セッションが開始されていません' });
         if (s.busy) return send({ type: 'error', key: msg.key, message: '応答中です。中断してから送信してください' });
-        if (typeof msg.text !== 'string' || !msg.text.trim()) return;
-        s.sendUser(msg.text).catch((err) => send({ type: 'error', key: msg.key, message: String(err) }));
+        const badImages = checkImages(msg.images);
+        if (badImages) return send({ type: 'error', key: msg.key, message: badImages });
+        const images = msg.images?.length ? msg.images : undefined;
+        if (images && !s.config.capabilities.includes('vision')) {
+          return send({ type: 'error', key: msg.key, message: `${s.config.model} は画像入力に対応していません` });
+        }
+        if (typeof msg.text !== 'string' || (!msg.text.trim() && !images)) return;
+        s.sendUser(msg.text, images).catch((err) => send({ type: 'error', key: msg.key, message: String(err) }));
+        break;
+      }
+      case 'configure': {
+        const s = sessions.get(msg.key);
+        if (!s) return send({ type: 'error', key: msg.key, message: 'セッションが開始されていません' });
+        resolveSettings(msg.options ?? {})
+          .then((settings) => {
+            if (!s.configure(settings)) send({ type: 'error', key: msg.key, message: '応答中は設定を変更できません。終わってから変更してください' });
+          })
+          .catch((err) => send({ type: 'error', key: msg.key, message: (err as Error).message }));
         break;
       }
       case 'permission':

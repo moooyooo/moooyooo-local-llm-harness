@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   cleanSummary,
   estimateTokens,
+  IMAGE_TOKENS,
   keepBudget,
   messagesTokens,
   piecePrompt,
@@ -22,10 +23,12 @@ const assistant = (content: string, call?: string): OllamaMessage => ({
 });
 const tool = (content: string, id: string): OllamaMessage => ({ role: 'tool', content, tool_call_id: id, tool_name: 'Read' });
 
-test('token estimate: about 3 ASCII characters per token, one per Japanese character', () => {
+test('token estimate: about 3 ASCII characters per token, one per Japanese character, a fixed cost per image', () => {
   assert.equal(estimateTokens('abcdef'), 2);
   assert.equal(estimateTokens('あいう'), 3);
   assert.equal(estimateTokens(''), 0);
+  assert.equal(messagesTokens([{ role: 'user', content: '', images: ['a', 'b'] }]) - messagesTokens([user('')]), 2 * IMAGE_TOKENS);
+  assert.match(transcriptPieces([{ role: 'user', content: 'これ', images: ['a'] }], 100)[0], /^USER: これ \[1 image\(s\) attached\]/);
 });
 
 test('split keeps the newest messages that fit, and never starts the kept part with a tool result', () => {

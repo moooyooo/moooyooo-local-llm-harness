@@ -76,7 +76,7 @@ export function ModelCaps({ model }: { model?: ModelInfo }) {
         {caps.has('tools') ? 'ツール' : 'ツールなし'}
       </span>
       {caps.has('thinking') && <span className="cap on" title="思考（reasoning）">思考</span>}
-      {caps.has('vision') && <span className="cap" title="画像入力（このハーネスでは未使用）">画像</span>}
+      {caps.has('vision') && <span className="cap on" title="画像入力（貼り付け・ドロップ・「画像」ボタンで添付できます）">画像</span>}
       <span className="muted">
         {[model.parameterSize, model.quantization, formatBytes(model.size), model.contextLength && `最大 ${formatTokens(model.contextLength)}`]
           .filter(Boolean)

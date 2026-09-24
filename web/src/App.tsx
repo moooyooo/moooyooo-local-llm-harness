@@ -11,6 +11,7 @@ import {
   requestNotificationPermission,
   showNotification,
 } from './notifications';
+import { base64Of, imageFiles, MAX_IMAGES, readImage, type Attachment } from './images';
 import { activeTab, newTabKey, pendingPermissions, tabCwd, tabLabel } from './state';
 import { useHarness } from './useHarness';
 import { formatBytes, formatTokens, summarizeInput } from './util';
@@ -32,6 +33,7 @@ const PERMISSION_MODES: { value: PermissionMode; label: string }[] = [
 ];
 const SETTINGS_KEY = 'custom-harnes-local.settings';
 const APP_TITLE = 'Local Harness';
+const LOCKED_TITLE = '応答中は変更できません。終わってから変更すると、次のメッセージから適用されます';
 
 interface Settings {
   model?: string;
@@ -58,6 +60,10 @@ function loadSettings(): Settings {
 export function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  /** Images attached to each tab's unsent message. */
+  const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
+  const [imageNote, setImageNote] = useState('');
+  const [dragging, setDragging] = useState(false);
   const [resumeInput, setResumeInput] = useState('');
   const [notifyPermission, setNotifyPermission] = useState(notificationPermission);
 
@@ -70,8 +76,32 @@ export function App() {
     state.models.find((m) => m.name === settings.model) ??
     state.models.find((m) => m.capabilities.includes('tools')) ??
     state.models[0];
-  const canThink = !!model?.capabilities.includes('thinking');
   const canStart = state.connected && !!model;
+  // A running tab shows and changes its own settings (from the next message); otherwise these are for the next start.
+  const live = tab.running ? tab.session : undefined;
+  const shown = {
+    model: live?.model ?? model?.name ?? '',
+    think: live ? live.think : (settings.think ?? ''),
+    numCtx: live ? (live.numCtx ?? 0) : (settings.numCtx ?? 0),
+    permissionMode: live?.permissionMode ?? settings.permissionMode ?? 'default',
+  };
+  const shownModel = state.models.find((m) => m.name === shown.model);
+  const canThink = !!shownModel?.capabilities.includes('thinking');
+  const canAttach = !!live && !!shownModel?.capabilities.includes('vision');
+  const settingsLocked = !!live && tab.busy;
+
+  // A file dropped outside the drop area would make the browser open it and leave the app.
+  useEffect(() => {
+    const block = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    };
+    window.addEventListener('dragover', block);
+    window.addEventListener('drop', block);
+    return () => {
+      window.removeEventListener('dragover', block);
+      window.removeEventListener('drop', block);
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -184,11 +214,37 @@ export function App() {
     send({ type: 'stop', key });
     dispatch({ type: 'closeTab', key });
     setDrafts(({ [key]: _, ...rest }) => rest);
+    setAttachments(({ [key]: _, ...rest }) => rest);
   };
 
-  const sendUser = (key: string, text: string) => {
-    dispatch({ type: 'userSent', key, text, at: Date.now() });
-    send({ type: 'user', key, text });
+  const sendUser = (key: string, text: string, images: Attachment[] = []) => {
+    const dataUrls = images.map((a) => a.dataUrl);
+    dispatch({ type: 'userSent', key, text, images: dataUrls.length ? dataUrls : undefined, at: Date.now() });
+    send({ type: 'user', key, text, ...(images.length && { images: dataUrls.map(base64Of) }) });
+  };
+
+  const addImages = async (key: string, files: File[]) => {
+    if (!files.length) return;
+    if (!canAttach) {
+      setImageNote(tab.running ? `${shown.model} は画像入力に対応していません。vision 対応のモデルに切り替えてください` : 'セッションを開始してから添付してください');
+      return;
+    }
+    const room = MAX_IMAGES - (attachments[key]?.length ?? 0);
+    try {
+      const added = await Promise.all(files.slice(0, Math.max(0, room)).map(readImage));
+      setAttachments((a) => ({ ...a, [key]: [...(a[key] ?? []), ...added] }));
+      setImageNote(files.length > room ? `画像は 1 回に ${MAX_IMAGES} 枚までです` : '');
+    } catch {
+      setImageNote('画像を読み込めませんでした（PNG・JPEG などの画像を使ってください）');
+    }
+  };
+
+  /** Settings changed in the sidebar: the default for new sessions, and for a running tab also its own. */
+  const changeSettings = (patch: Partial<Pick<Settings, 'model' | 'think' | 'numCtx' | 'permissionMode'>>) => {
+    setSettings((s) => ({ ...s, ...patch }));
+    if (!live) return;
+    const next = { model: live.model, think: live.think, numCtx: live.numCtx, permissionMode: live.permissionMode, ...patch };
+    send({ type: 'configure', key: tab.key, options: { ...next, numCtx: next.numCtx || undefined } });
   };
 
   const answerPermission = (key: string, id: string, allow: boolean) => {
@@ -220,28 +276,38 @@ export function App() {
         </label>
         <label>
           モデル
-          <select value={model?.name ?? ''} disabled={!state.models.length} onChange={(e) => setSettings({ ...settings, model: e.target.value })}>
+          <select
+            value={shown.model}
+            disabled={!state.models.length || settingsLocked}
+            title={settingsLocked ? LOCKED_TITLE : undefined}
+            onChange={(e) => changeSettings({ model: e.target.value })}
+          >
             {!state.models.length && <option value="">(モデルなし)</option>}
+            {live && !shownModel && <option value={live.model}>{live.model}</option>}
             {state.models.map((m) => (
               <option key={m.name} value={m.name}>
                 {m.name}（{[m.parameterSize, formatBytes(m.size)].filter(Boolean).join(', ')}）{m.capabilities.includes('tools') ? '' : ' ※ツールなし'}
               </option>
             ))}
           </select>
-          <ModelCaps model={model} />
+          <ModelCaps model={shownModel} />
         </label>
         <div className="row2">
           <label title={canThink ? '思考（reasoning）の有無。オフにすると速くなりますが、難しい作業の質は下がります' : 'このモデルは思考に対応していません'}>
             思考
-            <select value={settings.think ?? ''} disabled={!canThink} onChange={(e) => setSettings({ ...settings, think: e.target.value as ThinkSetting })}>
+            <select
+              value={shown.think}
+              disabled={!canThink || settingsLocked}
+              onChange={(e) => changeSettings({ think: e.target.value as ThinkSetting })}
+            >
               {THINK_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </label>
           <label title="コンテキスト長（num_ctx）。大きいほど長い作業を扱えますが、メモリを使い、変更するとモデルが再読み込みされます">
             コンテキスト長
-            <select value={settings.numCtx ?? 0} onChange={(e) => setSettings({ ...settings, numCtx: Number(e.target.value) })}>
+            <select value={shown.numCtx} disabled={settingsLocked} onChange={(e) => changeSettings({ numCtx: Number(e.target.value) })}>
               {NUM_CTX_OPTIONS.map((n) => (
-                <option key={n} value={n} disabled={!!n && !!model?.contextLength && n > model.contextLength}>
+                <option key={n} value={n} disabled={!!n && !!shownModel?.contextLength && n > shownModel.contextLength}>
                   {n ? formatTokens(n) : '(既定)'}
                 </option>
               ))}
@@ -251,8 +317,10 @@ export function App() {
         <label>
           権限モード
           <select
-            value={settings.permissionMode ?? 'default'}
-            onChange={(e) => setSettings({ ...settings, permissionMode: e.target.value as PermissionMode })}
+            value={shown.permissionMode}
+            disabled={settingsLocked}
+            title={settingsLocked ? LOCKED_TITLE : undefined}
+            onChange={(e) => changeSettings({ permissionMode: e.target.value as PermissionMode })}
           >
             {PERMISSION_MODES.map((m) => (
               <option key={m.value} value={m.value}>{m.label}</option>
@@ -277,7 +345,11 @@ export function App() {
           </button>
           <button disabled={!tab.running} onClick={() => send({ type: 'stop', key: tab.key })}>停止</button>
         </div>
-        <div className="hint-muted">モデル・思考・コンテキスト長・権限モードは「開始」時に適用されます。</div>
+        <div className="hint-muted">
+          {live
+            ? 'このタブでは、変更は次のメッセージから適用されます（新しく開始するときの既定にもなります）。'
+            : 'モデル・思考・コンテキスト長・権限モードは「開始」時に適用されます。'}
+        </div>
 
         <label className={`check ${settings.autoApprove ? 'auto-on' : ''}`}>
           <input type="checkbox" checked={!!settings.autoApprove} onChange={(e) => toggleAutoApprove(e.target.checked)} />
@@ -326,7 +398,22 @@ export function App() {
         <div className="data-dir" title={`セッションの保存先: ${state.dataDir}`}>{state.dataDir}</div>
       </aside>
 
-      <main className="main">
+      <main
+        className={`main ${dragging ? 'dragging' : ''}`}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes('Files')) return;
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          addImages(tab.key, imageFiles(e.dataTransfer.files));
+        }}
+      >
         <TabBar
           state={state}
           onActivate={(key) => dispatch({ type: 'activate', key })}
@@ -354,9 +441,18 @@ export function App() {
         <Composer
           text={drafts[tab.key] ?? ''}
           setText={(text) => setDrafts((d) => ({ ...d, [tab.key]: text }))}
+          attachments={attachments[tab.key] ?? []}
+          canAttach={canAttach}
+          note={imageNote}
           disabled={!tab.running}
           busy={tab.busy}
-          onSend={(text) => sendUser(tab.key, text)}
+          onSend={(text) => {
+            sendUser(tab.key, text, attachments[tab.key]);
+            setAttachments(({ [tab.key]: _, ...rest }) => rest);
+            setImageNote('');
+          }}
+          onAddImages={(files) => addImages(tab.key, files)}
+          onRemoveImage={(id) => setAttachments((a) => ({ ...a, [tab.key]: (a[tab.key] ?? []).filter((x) => x.id !== id) }))}
           onInterrupt={() => send({ type: 'interrupt', key: tab.key })}
         />
       </main>

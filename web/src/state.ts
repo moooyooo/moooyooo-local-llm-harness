@@ -11,10 +11,12 @@ import type {
   ThinkSetting,
   TurnStats,
 } from '../../shared/protocol';
+import { imageDataUrl } from './images';
 import { baseName } from './util';
 
 export type Item =
-  | { kind: 'user'; id: string; text: string }
+  /** `images`: data URLs. */
+  | { kind: 'user'; id: string; text: string; images?: string[] }
   | { kind: 'text'; id: string; text: string }
   | { kind: 'thinking'; id: string; text: string }
   /** `callId` comes from the model and may repeat across turns, so it isn't used as the item id. */
@@ -150,7 +152,8 @@ export type Action =
   | { type: 'setCwd'; key: string; cwd: string }
   | { type: 'resetTab'; key: string; cwd: string; resumeId?: string }
   | { type: 'markUnread'; key: string }
-  | { type: 'userSent'; key: string; text: string; at: number }
+  /** `images`: data URLs of the attached images. */
+  | { type: 'userSent'; key: string; text: string; images?: string[]; at: number }
   | { type: 'permissionAnswered'; key: string; id: string; allow: boolean };
 
 let seq = 0;
@@ -190,7 +193,7 @@ export function reducer(state: State, action: Action): State {
       return updateTab(state, action.key, (t) => ({ ...t, unread: true }));
     case 'userSent':
       return updateTab(state, action.key, (t) => ({
-        ...pushItems(t, { kind: 'user', id: nextId(), text: action.text }),
+        ...pushItems(t, { kind: 'user', id: nextId(), text: action.text, images: action.images }),
         busy: true,
         lastActivity: action.at,
       }));
@@ -262,7 +265,7 @@ function onEvent(tab: Tab, ev: AgentEvent): Tab {
         ? { ...tab, streamText: tab.streamText + ev.text }
         : { ...tab, streamThinking: tab.streamThinking + ev.text };
     case 'user':
-      return pushItems(tab, { kind: 'user', id: nextId(), text: ev.text });
+      return pushItems(tab, { kind: 'user', id: nextId(), text: ev.text, images: ev.images?.map(imageDataUrl) });
     case 'notice':
       return pushItems(tab, notice(ev.text));
     case 'compact': {

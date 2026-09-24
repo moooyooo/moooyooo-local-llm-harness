@@ -15,6 +15,8 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
   in `server/index.ts`; closing the socket stops them all). `sendUser` runs one turn: call the model → run the tool calls
   (permission gate → user prompt or auto-approval → tool) → feed results back, until the model answers without tool calls.
   Every tool call always gets a `tool` message, even when interrupted, so the conversation stays valid.
+  Model, think, `num_ctx` and permission mode can change between turns (`configure`, the `configure` client message);
+  that rebuilds the system prompt and writes a new `meta` record, which the history shows as a notice.
   Each model call is capped at `MAX_OUTPUT_TOKENS`; a reply cut off there is retried once with a request for smaller steps
   (a `message` record with `notice`, shown in the GUI as a notice instead of a user prompt).
 - `server/compact.ts`: context compaction. Before each model call the prompt size is estimated (Ollama's `prompt_eval_count`
@@ -28,7 +30,10 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
   (fetch aborts with "terminated" after 5 silent minutes). Tool results go back as `{role:"tool", tool_call_id, tool_name, content}`;
   `think: true` on a model without the `thinking` capability is an error (so `thinkParam` only sends it to thinking models).
   Hitting `num_predict` ends with done_reason `length` and drops a half-written tool call; overflowing `num_ctx` never stops
-  generation (Ollama silently shifts the context and ends with `stop`).
+  generation (Ollama silently shifts the context and ends with `stop`). Images go in a user message's `images` as plain
+  base64 (a `data:` prefix is an error) and cost about width × height / 1024 tokens; a model without the `vision`
+  capability answers HTTP 400 to any image in the conversation, so `AgentSession.request` replaces them with a note.
+  A model already loaded with a larger context is reused for a smaller `num_ctx`.
 - `server/tools.ts`: Read / Write / Edit / Bash (PowerShell on Windows) / Glob / Grep / LS. Names and parameters follow
   Claude Code's tools so models use them naturally and `autoApprove.ts` classifies them unchanged. `validate` runs before
   the permission prompt so the user isn't asked about calls that would fail anyway (e.g. Edit without a prior Read).

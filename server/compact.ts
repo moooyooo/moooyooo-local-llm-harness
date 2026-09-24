@@ -37,8 +37,15 @@ export function estimateTokens(text: string): number {
   return Math.ceil(ascii / 3) + (text.length - ascii);
 }
 
+/**
+ * An image costs about width × height / 1024 tokens (qwen3.8: 1600×1000 → ~1,550). The GUI scales images to at most
+ * 1600 px on the long side, so this is an upper bound.
+ */
+export const IMAGE_TOKENS = 2500;
+
 export function messageTokens(m: OllamaMessage): number {
   let n = 4 + estimateTokens(m.content);
+  if (m.role === 'user' && m.images) n += m.images.length * IMAGE_TOKENS;
   if (m.role === 'assistant') {
     if (m.thinking) n += estimateTokens(m.thinking);
     if (m.tool_calls?.length) n += estimateTokens(JSON.stringify(m.tool_calls));
@@ -114,6 +121,8 @@ function transcriptLines(m: OllamaMessage): string[] {
       ];
     case 'tool':
       return text(`RESULT of ${m.tool_name ?? 'tool'}`, m.content || '(empty)');
+    case 'user':
+      return text('USER', m.content + (m.images?.length ? ` [${m.images.length} image(s) attached]` : ''));
     default:
       return text(m.role.toUpperCase(), m.content);
   }
