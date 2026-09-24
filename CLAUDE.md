@@ -1,0 +1,60 @@
+# custom-harnes-local-llm
+
+A local web GUI coding-agent harness for local LLMs served by Ollama. The UX follows
+[custom-harnes](https://github.com/moooyooo/custom-harnes) (a GUI for the Claude Code CLI), but instead of driving a CLI,
+the server runs its own agent loop against Ollama's `/api/chat`.
+It is for personal, local use only: do not add features that expose it to other users or to the network.
+
+## Architecture
+
+```
+Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJSON stream) ⇄ Ollama /api/chat
+```
+
+- `server/agent.ts`: `AgentSession`, one per GUI tab (a connection holds up to `MAX_SESSIONS` in a `Map<key, AgentSession>`
+  in `server/index.ts`; closing the socket stops them all). `sendUser` runs one turn: call the model → run the tool calls
+  (permission gate → user prompt or auto-approval → tool) → feed results back, until the model answers without tool calls.
+  Every tool call always gets a `tool` message, even when interrupted, so the conversation stays valid.
+  Each model call is capped at `MAX_OUTPUT_TOKENS`; a reply cut off there is retried once with a request for smaller steps
+  (a `message` record with `notice`, shown in the GUI as a notice instead of a user prompt).
+  The system prompt is built once per session so Ollama can reuse its KV cache.
+- `server/ollama.ts`: REST client. Verified against Ollama 0.32: tool calls arrive whole (with an `id`) in one streamed chunk,
+  and nothing is streamed while one is generated (minutes for a large Write), so `chat` uses `node:http` without a timeout
+  (fetch aborts with "terminated" after 5 silent minutes). Tool results go back as `{role:"tool", tool_call_id, tool_name, content}`;
+  `think: true` on a model without the `thinking` capability is an error (so `thinkParam` only sends it to thinking models).
+  Hitting `num_predict` ends with done_reason `length` and drops a half-written tool call; overflowing `num_ctx` never stops
+  generation (Ollama silently shifts the context and ends with `stop`).
+- `server/tools.ts`: Read / Write / Edit / Bash (PowerShell on Windows) / Glob / Grep / LS. Names and parameters follow
+  Claude Code's tools so models use them naturally and `autoApprove.ts` classifies them unchanged. `validate` runs before
+  the permission prompt so the user isn't asked about calls that would fail anyway (e.g. Edit without a prior Read).
+- `server/permissions.ts`: `gate()` decides allow / ask / deny per permission mode; `assess()` adds the classifier decision and,
+  for git init/add/commit/push, the security scan. git init/add/commit/push always ask, even in `bypassPermissions`.
+- `server/autoApprove.ts`, `server/shellParse.ts`, `server/secretScan.ts`: taken from custom-harnes. Policy: allowlist only.
+  When you change the rules, add cases to `server/autoApprove.test.ts`, and never loosen a rule without a test.
+  Test fixtures must build fake secrets by string concatenation.
+- `server/store.ts`: sessions as `<HARNESS_DATA_DIR>/sessions/<uuid>.jsonl` (`meta` / `message` / `result` records).
+  `message` records are exactly what was sent to Ollama, so resuming replays them as-is; `toEvents` turns them into GUI events.
+- `server/systemPrompt.ts`: environment, working rules, plan-mode rules, and the working folder's `AGENTS.md` / `CLAUDE.md`.
+- `shared/protocol.ts`: browser⇄server messages. Session-scoped messages carry `key`, a client-generated tab ID.
+  Agent progress is `{type:'event', key, ev: AgentEvent}`; a resumed session's past turns come as `history` with the same event shapes.
+- `web/src/state.ts`: the reducer. Shared parts (Ollama status, models, history) and `tabs: Tab[]`.
+- `web/src/App.tsx`: wiring, settings and notifications. UI pieces live in `web/src/components/`. Keep non-component exports
+  out of component files; otherwise Vite fast refresh breaks.
+- `web/`: Vite + React 19. `vite.config.ts` has `root: 'web'`; builds to `dist/`, which the server serves in production.
+
+## Commands
+
+- `npm run dev`: server (tsx watch --dev, :38721) + Vite (:38722, proxies /ws). Open http://localhost:38722
+- `npm run build` then `npm start`: serves `dist/` at http://localhost:38720
+- Ports live in `shared/ports.ts` (different from custom-harnes so both can run at once; avoid 49152+)
+- `npm run typecheck`: checks both server and web (TypeScript 7)
+- `npm test`: node:test via tsx (`server/**/*.test.ts`). `agent.test.ts` drives the loop with a scripted fake model.
+
+## Rules
+
+- Keep the server bound to `127.0.0.1` and keep the WebSocket Origin allowlist (`ALLOWED_ORIGINS` in `server/index.ts`).
+  Any web page can reach localhost, so without the allowlist a malicious site could run commands through the agent.
+- Anything the model asks to run goes through `gate()`; don't add a tool that bypasses it.
+- When you are unsure of an Ollama response shape, check it against the real server (`curl http://127.0.0.1:11434/api/chat ...`). Don't guess.
+- Local models have small contexts: cap tool output (`MAX_OUTPUT_CHARS`) and keep tool descriptions short and direct.
+- UI text is Japanese.
