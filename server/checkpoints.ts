@@ -258,7 +258,10 @@ class Repo {
           reject(new GitError(args[0], stderr || err.message));
         },
       );
-      child.stdin?.end(input ?? '');
+      // Git may exit before reading stdin (EPIPE); its exit code and stderr tell what happened.
+      child.stdin?.on('error', () => {});
+      if (input === undefined) child.stdin?.end();
+      else child.stdin?.end(input);
     });
   }
 }
