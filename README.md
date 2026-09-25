@@ -10,7 +10,7 @@ Its UX follows the author's (private) web GUI for Claude Code.
 Instead of driving a CLI, the server runs its own agent loop against Ollama's `/api/chat` (tool calling) to read and edit
 files and run commands. Everything stays on your machine, unless you turn web search on.
 
-- Tested on macOS (Apple silicon) with Ollama 0.32. Windows (with PowerShell as the shell) is supported by design but untested.
+- Tested on macOS (Apple silicon) with Ollama 0.32 and 0.34. Windows (with PowerShell as the shell) is supported by design but untested.
 - **UI language: Japanese for now; English and Chinese are planned.** All UI text lives in language catalogs, so a new
   language is a new catalog (see [Adding a language](#adding-a-language)). Until then, button names are quoted below with their meaning.
 

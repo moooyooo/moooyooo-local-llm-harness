@@ -5,7 +5,7 @@ import type { LoadedModel, ModelInfo, OllamaStatus } from '../shared/protocol.js
 
 /**
  * Minimal client for the Ollama REST API (https://github.com/ollama/ollama/blob/main/docs/api.md).
- * Shapes below were checked against Ollama 0.32: tool calls arrive whole (with an `id`) in one streamed
+ * Shapes below were checked against Ollama 0.32 and 0.34: tool calls arrive whole (with an `id`) in one streamed
  * chunk, and nothing at all is streamed while one is generated (minutes for a large Write).
  * `think: true` on a model without the `thinking` capability is an error. Hitting `num_predict` ends with
  * done_reason "length" and drops a tool call cut off midway; overflowing `num_ctx` does not stop generation

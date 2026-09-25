@@ -27,7 +27,7 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
   shaped like the real ones (same tools and options, so the KV cache is reused). The latest user prompt is repeated word for
   word, and `readFiles` is cleared so edits need a fresh Read. Also on demand (`compact` client message).
   The system prompt is built once per session so Ollama can reuse its KV cache.
-- `server/ollama.ts`: REST client. Verified against Ollama 0.32: tool calls arrive whole (with an `id`) in one streamed chunk,
+- `server/ollama.ts`: REST client. Verified against Ollama 0.32 and 0.34: tool calls arrive whole (with an `id`) in one streamed chunk,
   and nothing is streamed while one is generated (minutes for a large Write), so `chat` uses `node:http` without a timeout
   (fetch aborts with "terminated" after 5 silent minutes). Tool results go back as `{role:"tool", tool_call_id, tool_name, content}`;
   `think: true` on a model without the `thinking` capability is an error (so `thinkParam` only sends it to thinking models).
