@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Local web GUI coding-agent harness that runs local LLMs through Ollama",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
