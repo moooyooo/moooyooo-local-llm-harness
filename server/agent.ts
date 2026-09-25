@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { msg, TextError, type Text } from '../shared/i18n/index.js';
-import type { AgentEvent, PermissionMode, ThinkSetting, ToolCall, TurnStats } from '../shared/protocol.js';
+import type { AgentEvent, CheckpointReason, PermissionMode, ThinkSetting, ToolCall, TurnStats } from '../shared/protocol.js';
+import type { CheckpointStore, RestoreResult, Snapshot } from './checkpoints.js';
 import {
   cleanSummary,
   COMPACT_AT,
@@ -22,7 +23,7 @@ import { assess, gate } from './permissions.js';
 import type { SessionRecord, SessionStore } from './store.js';
 import { describeSettingsChange, parseArguments, toToolCalls } from './store.js';
 import { buildSystemPrompt } from './systemPrompt.js';
-import { runTool, toolSchemas, validateTool } from './tools.js';
+import { isReadOnlyTool, runTool, toolSchemas, validateTool } from './tools.js';
 
 /** Model calls per user message before the turn is stopped. */
 export const MAX_TURNS = 100;
@@ -33,10 +34,15 @@ const MAX_REPEATS = 3;
  * (e.g. a whole app in one Write), which Ollama would otherwise stream nothing of for many minutes.
  */
 export const MAX_OUTPUT_TOKENS = 16_384;
+/** During a long turn, a checkpoint after this many calls of tools that can change files. */
+export const CHECKPOINT_EVERY = 10;
+/** Checkpoint failures that won't go away during the session, so checkpoints stop for it. */
+const PERMANENT_CHECKPOINT_FAILURES = new Set(['checkpoint.tooMany', 'checkpoint.tooLarge', 'checkpoint.noGit']);
 
 const DENIED =
   "The user doesn't want to proceed with this tool call, so it was not run. " +
   'Stop what you are doing and wait for the user to tell you how to proceed.';
+export const RESTORED_HEADER = '[The user restored the working folder to an earlier checkpoint]';
 const CUT_OFF =
   `Your last reply was cut off at the output limit (${MAX_OUTPUT_TOKENS} tokens), so no tool call from it was run. ` +
   'Continue the task in smaller steps: keep each Write or Edit to about 200 lines, and split large files into several files or several Edits.';
@@ -54,6 +60,8 @@ export interface AgentConfig {
   capabilities: string[];
   /** Conversation to continue when resuming. */
   history?: OllamaMessage[];
+  /** Checkpoints of the resumed session. */
+  checkpoints?: { commit: string; n: number }[];
 }
 
 export interface AgentDeps {
@@ -67,6 +75,8 @@ export interface AgentDeps {
   unload?: (model: string, signal: AbortSignal) => Promise<boolean>;
   /** Overrides the classifier + security scan (tests). */
   assess?: typeof assess;
+  /** Snapshots of the working folder before each message, so the user can roll files back. */
+  checkpoints?: CheckpointStore;
 }
 
 class Interrupted extends Error {}
@@ -94,6 +104,13 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   private lastPrompt?: string;
   /** `model@num_ctx` already reloaded once, so a window Ollama keeps smaller (e.g. for memory) isn't retried forever. */
   private reloadedFor?: string;
+  /** Checkpoint commit → its number in this session (the latest one when a commit is reused). */
+  private readonly checkpoints = new Map<string, number>();
+  private nextCheckpoint = 1;
+  /** Calls of file-changing tools since the last checkpoint. */
+  private changesSinceCheckpoint = 0;
+  /** Set when checkpoints can't work for this folder. */
+  private checkpointsOff = false;
 
   constructor(config: AgentConfig, deps: AgentDeps) {
     super();
@@ -101,6 +118,10 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     this.deps = deps;
     this.messages = closeDanglingToolCalls(config.history ?? []);
     this.lastPrompt = this.messages.findLast((m) => m.role === 'user' && !isHarnessMessage(m.content))?.content;
+    for (const { commit, n } of config.checkpoints ?? []) {
+      this.checkpoints.set(commit, n);
+      this.nextCheckpoint = Math.max(this.nextCheckpoint, n + 1);
+    }
     this.tools = config.capabilities.includes('tools');
     // Built once: a stable prompt prefix lets Ollama reuse its KV cache between calls.
     this.systemPrompt = buildSystemPrompt({ cwd: config.cwd, permissionMode: config.permissionMode, tools: this.tools, web: !!config.web });
@@ -129,6 +150,8 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     this.lastCall = { sig: '', count: 0 };
     this.lastPrompt = text;
     this.push({ role: 'user', content: text, ...(images?.length && { images }) });
+    // After the prompt, so the transcript and the saved history both show it under the message it precedes.
+    await this.checkpoint('prompt');
 
     try {
       for (;;) {
@@ -177,6 +200,8 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
         }
         cutOffRetried = false;
         await this.runCalls(calls, ctrl.signal);
+        this.changesSinceCheckpoint += calls.filter((c) => !isReadOnlyTool(c.name)).length;
+        if (this.changesSinceCheckpoint >= CHECKPOINT_EVERY) await this.checkpoint('progress');
       }
     } catch (err) {
       result = ctrl.signal.aborted
@@ -206,6 +231,45 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   stop() {
     this.removeAllListeners();
     this.abort?.abort();
+  }
+
+  hasCheckpoint(commit: string): boolean {
+    return this.checkpoints.has(commit);
+  }
+
+  /**
+   * Puts the working folder's files back as they were at a checkpoint (between turns), after recording the current
+   * state as a new checkpoint so this can be undone. The model is told, since its view of the files is now stale.
+   */
+  async restoreCheckpoint(commit: string): Promise<void> {
+    if (this.abort) return;
+    const n = this.checkpoints.get(commit);
+    const store = this.deps.checkpoints;
+    if (n === undefined || !store) return this.send({ type: 'restore', commit, phase: 'failed', message: msg('checkpoint.unknown') });
+    const ctrl = new AbortController();
+    this.abort = ctrl;
+    try {
+      const { sessionId, cwd } = this.config;
+      const r = await store.restore(cwd, sessionId, commit, `Before restoring checkpoint #${n}`);
+      if (r.restored + r.deleted === 0) {
+        this.send({ type: 'notice', text: msg('checkpoint.restoredNothing', { n }) });
+      } else {
+        const backup = this.recordCheckpoint(r.backup, 'backup');
+        this.readFiles.clear();
+        this.lastCall = { sig: '', count: 0 };
+        this.changesSinceCheckpoint = 0;
+        const what = [
+          ...(r.restored ? [msg('checkpoint.restoredBack', { count: r.restored })] : []),
+          ...(r.deleted ? [msg('checkpoint.restoredDelete', { count: r.deleted })] : []),
+        ];
+        this.push({ role: 'user', content: restoreNote(n, r) }, { notice: msg('checkpoint.restored', { n, what, backup }) });
+      }
+      this.send({ type: 'restore', commit, phase: 'done' });
+    } catch (err) {
+      this.send({ type: 'restore', commit, phase: 'failed', message: err instanceof TextError ? err.text : String(err) });
+    } finally {
+      this.abort = undefined;
+    }
   }
 
   /** Summarizes the conversation on the user's request, between turns. */
@@ -346,6 +410,35 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     const after = this.promptEstimate();
     this.persist({ type: 'compact', messages: [...this.messages], summary, auto, tokensBefore: before, tokensAfter: after, timestamp: new Date().toISOString() });
     this.send({ type: 'compact', phase: 'done', auto, summary, tokensBefore: before, tokensAfter: after });
+  }
+
+  /** Records the working folder's files. Failures are reported, never thrown: the task goes on without a checkpoint. */
+  private async checkpoint(reason: CheckpointReason) {
+    const store = this.deps.checkpoints;
+    if (!store || this.checkpointsOff || !this.tools || this.config.permissionMode === 'plan') return;
+    this.changesSinceCheckpoint = 0;
+    try {
+      const snap = await store.snapshot(this.config.cwd, this.config.sessionId, `${reason} (session ${this.config.sessionId})`);
+      if (reason === 'progress' && snap.changed === 0) return;
+      this.recordCheckpoint(snap, reason);
+    } catch (err) {
+      const text = err instanceof TextError ? err.text : String(err);
+      const permanent = typeof text === 'object' && PERMANENT_CHECKPOINT_FAILURES.has(text.key);
+      if (permanent) this.checkpointsOff = true;
+      this.send({ type: 'notice', text: msg(permanent ? 'checkpoint.disabled' : 'checkpoint.failed', { reason: text }) });
+    }
+  }
+
+  /** Numbers, saves and reports a checkpoint; returns its number. */
+  private recordCheckpoint(snap: Snapshot, reason: CheckpointReason): number {
+    const n = this.nextCheckpoint++;
+    this.checkpoints.set(snap.commit, n);
+    const { commit, changed } = snap;
+    const excluded = snap.excluded.length ? snap.excluded : undefined;
+    const timestamp = new Date().toISOString();
+    this.persist({ type: 'checkpoint', commit, n, reason, changed, ...(excluded && { excluded }), timestamp });
+    this.send({ type: 'checkpoint', commit, n, reason, changed, at: timestamp, ...(excluded && { excluded }) });
+    return n;
   }
 
   private async summarize(req: ChatRequest, signal: AbortSignal): Promise<string> {
@@ -516,7 +609,17 @@ function withoutImages(m: OllamaMessage): OllamaMessage {
 
 /** Messages the harness wrote to the model in the user role, as opposed to the user's own prompts. */
 function isHarnessMessage(content: string): boolean {
-  return content === CUT_OFF || content.startsWith(SUMMARY_HEADER);
+  return content === CUT_OFF || content.startsWith(SUMMARY_HEADER) || content.startsWith(RESTORED_HEADER);
+}
+
+function restoreNote(n: number, r: RestoreResult): string {
+  return (
+    `${RESTORED_HEADER}\n` +
+    `The files in the working folder were put back as they were at checkpoint #${n}, taken earlier in this conversation: ` +
+    `${r.restored} file(s) were written back and ${r.deleted} file(s) created after it were deleted. ` +
+    'Changes made to files after that point are gone, so files may differ from what you read or wrote earlier in this conversation. ' +
+    'Read a file again before editing it, and do not redo the undone work unless the user asks.'
+  );
 }
 
 /**

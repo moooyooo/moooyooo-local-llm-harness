@@ -114,6 +114,13 @@ For local LLMs:
   「会話を要約」 (summarize) does it on demand, and the summary can be opened in the transcript
 - **Web search** (off by default): searches through a local SearXNG and reads pages as plain text.
   Page fetches never reach this machine or the LAN, and queries or URLs that look like they carry a secret are not sent
+- **Checkpoints**: the working folder's files are recorded before each message (and every 10 file-changing tool calls
+  in a long turn). Each checkpoint in the transcript shows what changed since, file by file with diffs, and
+  「ここに戻す」 (restore) puts the files back after a confirmation. The state before a restore is recorded too, so a
+  restore can be undone, and the model is told about it. Checkpoints live in a git repository of the harness's own
+  (`checkpoints/` in the data folder); the folder's own `.git` is never touched and the folder need not be a git
+  repository. Left out: files in `.gitignore`, dependency folders, git repositories inside the folder and files over
+  20 MB. Changes outside the folder (installs, pushes) can't be undone. Needs `git`
 
 ### Tools the agent can use
 
@@ -131,7 +138,7 @@ For local LLMs:
 | `PORT` | production `38720` / development `38721` | Server port (defaults in `shared/ports.ts`) |
 | `HARNESS_CWD` | the folder the server starts in | Default working folder |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama URL |
-| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | Session history (`sessions/<id>.jsonl`) and SearXNG settings (`searxng/`) |
+| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | Session history (`sessions/<id>.jsonl`), checkpoints (`checkpoints/`, unused ones deleted after 30 days) and SearXNG settings (`searxng/`) |
 | `SEARXNG_URL` | `http://127.0.0.1:38730` | SearXNG used by WebSearch |
 
 ## Tips

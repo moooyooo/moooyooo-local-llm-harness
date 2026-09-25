@@ -46,9 +46,18 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 - `server/autoApprove.ts`, `server/shellParse.ts`, `server/secretScan.ts`: taken from custom-harnes. Policy: allowlist only.
   When you change the rules, add cases to `server/autoApprove.test.ts`, and never loosen a rule without a test.
   Test fixtures must build fake secrets by string concatenation.
-- `server/store.ts`: sessions as `<HARNESS_DATA_DIR>/sessions/<uuid>.jsonl` (`meta` / `message` / `result` / `compact` records).
-  `message` records are exactly what was sent to Ollama, so resuming replays them as-is; a `compact` record holds the whole
-  conversation after compaction and replaces everything before it. `toEvents` turns records into GUI events (full history).
+- `server/store.ts`: sessions as `<HARNESS_DATA_DIR>/sessions/<uuid>.jsonl` (`meta` / `message` / `result` / `compact` /
+  `checkpoint` records). `message` records are exactly what was sent to Ollama, so resuming replays them as-is; a `compact`
+  record holds the whole conversation after compaction and replaces everything before it; `checkpoint` records keep a
+  session's checkpoints restorable after resuming. `toEvents` turns records into GUI events (full history).
+- `server/checkpoints.ts`: checkpoints, snapshots of the working folder in a git repository of the harness's own
+  (`<HARNESS_DATA_DIR>/checkpoints/<hash of the folder>/`, the folder as its work tree, `refs/sessions/<id>` per session).
+  It runs git with its own gitconfig (`GIT_CONFIG_GLOBAL`, `GIT_*` variables dropped, literal pathspecs), so the user's
+  settings and the folder's own `.git` never come into play. Nested repositories and files over 20 MB are added to its
+  `info/exclude` before `git add` (a nested repository makes `git add -A` fail). `AgentSession` takes one before each user
+  message and every `CHECKPOINT_EVERY` file-changing calls; `restoreCheckpoint` records a backup checkpoint first, then
+  tells the model with a user-role message (`RESTORED_HEADER`) and clears `readFiles`. Restoring and showing changes are
+  user actions from the GUI, never tools.
 - `server/web.ts`: WebSearch / WebFetch, offered only when the session's web setting is on (default off). Searches go to
   a local SearXNG (`npm run searxng` → `scripts/searxng.ts`, Docker via OrbStack, 127.0.0.1:38730, JSON format enabled);
   WebFetch never reaches this machine or the LAN (`checkUrl` plus a `lookup` that refuses private addresses at connect
@@ -87,3 +96,4 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 - Local models have small contexts: cap tool output (`MAX_OUTPUT_CHARS`) and keep tool descriptions short and direct.
 - GUI text goes in the `shared/i18n` catalogs, never directly in code (`server/i18n.test.ts` fails otherwise); add keys
   to `ja.ts` first. Text for the model (system prompt, tool results) stays in English. Server logs may stay Japanese.
+  Saved history keeps `Msg` keys and params, so once a key has shipped, don't rename its placeholders: add a new key instead.

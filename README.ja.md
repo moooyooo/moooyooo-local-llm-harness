@@ -114,6 +114,11 @@ npm run searxng -- stop        # 停止（status で状態確認）
   左パネルの「会話を要約」でいつでも実行でき、要約の内容は会話の中で開いて確認できる
 - **Web 検索**（ON/OFF、既定 OFF）：ローカルの SearXNG で検索し、Web ページを本文だけのテキストにして読む。
   ページの取得はこの PC や LAN には届かず、検索語や URL に秘密情報らしいものがあれば送らない
+- **チェックポイント**：メッセージを送るたびに（長いターンではファイルを変えるツールを 10 回使うごとにも）作業フォルダのファイルを記録する。
+  会話の中のチェックポイントから、その時点のあとの変更をファイルごとに差分で確認でき、「ここに戻す」で確認のうえファイルを戻せる。
+  戻す直前の状態も記録するので戻したこと自体も取り消せ、戻したことはモデルにも伝える。記録はハーネス専用の Git リポジトリ
+  （データフォルダの `checkpoints/`）に置き、作業フォルダの `.git` には触れない（Git 管理していないフォルダでも使える）。
+  `.gitignore` の対象・依存フォルダ・フォルダ内の Git リポジトリ・20 MB を超えるファイルは対象外。フォルダの外への変更（インストールや push）は戻せない。`git` が必要
 
 ### エージェントが使えるツール
 
@@ -131,7 +136,7 @@ npm run searxng -- stop        # 停止（status で状態確認）
 | `PORT` | 本番 `38720` / 開発 `38721` | サーバーのポート（既定値は `shared/ports.ts`） |
 | `HARNESS_CWD` | サーバー起動時のフォルダ | 作業フォルダの既定値 |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama の URL |
-| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | セッション履歴の保存先（`sessions/<id>.jsonl`）と SearXNG の設定（`searxng/`） |
+| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | セッション履歴（`sessions/<id>.jsonl`）、チェックポイント（`checkpoints/`。30 日使われないものは削除）、SearXNG の設定（`searxng/`）の保存先 |
 | `SEARXNG_URL` | `http://127.0.0.1:38730` | WebSearch が使う SearXNG の URL |
 
 ## ヒント

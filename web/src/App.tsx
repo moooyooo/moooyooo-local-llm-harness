@@ -3,6 +3,7 @@ import type { PermissionMode, ServerMessage, SessionSummary, ThinkSetting } from
 import { SessionHistory, Welcome } from './components/Sessions';
 import { ModelCaps, OllamaPanel, SessionPanel } from './components/SidebarParts';
 import { TabBar } from './components/TabBar';
+import type { CheckpointHandlers } from './components/Checkpoint';
 import { Composer, Transcript } from './components/Transcript';
 import {
   notificationPermission,
@@ -262,6 +263,21 @@ export function App() {
     send({ type: 'permission', key, requestId: id, allow });
   };
 
+  const checkpointHandlers = (key: string): CheckpointHandlers => ({
+    onChanges: (commit) => {
+      dispatch({ type: 'checkpointRequested', key, commit });
+      send({ type: 'checkpointChanges', key, commit });
+    },
+    onPatch: (commit, path) => {
+      dispatch({ type: 'patchRequested', key, commit, path });
+      send({ type: 'checkpointPatch', key, commit, path });
+    },
+    onRestore: (commit) => {
+      dispatch({ type: 'restoreRequested', key, commit });
+      send({ type: 'restoreCheckpoint', key, commit });
+    },
+  });
+
   const openSessionIds = new Set(state.tabs.map((tb) => tb.session?.sessionId ?? tb.resumeId).filter((x): x is string => !!x));
 
   return (
@@ -468,6 +484,7 @@ export function App() {
             tab={tab}
             onPermission={(id, allow) => answerPermission(tab.key, id, allow)}
             onSend={(text) => sendUser(tab.key, text)}
+            checkpoint={checkpointHandlers(tab.key)}
           />
         )}
         <Composer

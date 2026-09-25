@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import type { AgentEvent, PermissionMode } from '../shared/protocol.js';
-import { AgentSession, MAX_OUTPUT_TOKENS, thinkParam, type AgentDeps } from './agent.js';
-import { textOf, type Text } from '../shared/i18n/index.js';
+import { AgentSession, CHECKPOINT_EVERY, MAX_OUTPUT_TOKENS, RESTORED_HEADER, thinkParam, type AgentDeps } from './agent.js';
+import { CheckpointStore } from './checkpoints.js';
+import { msg, TextError, textOf, type Text } from '../shared/i18n/index.js';
 import { SUMMARY_HEADER, SUMMARY_PROMPT } from './compact.js';
 import type { ChatFn, ChatRequest, ChatResult, OllamaMessage, OllamaToolCall } from './ollama.js';
-import { SessionStore, toEvents, toMessages } from './store.js';
+import { checkpointsOf, SessionStore, toEvents, toMessages } from './store.js';
 import { SHELL_TOOL } from './tools.js';
 
 const roots: string[] = [];
@@ -58,6 +59,8 @@ function session(
     loadedCtx?: number | (() => number | undefined);
     unload?: AgentDeps['unload'];
     history?: OllamaMessage[];
+    checkpoints?: AgentDeps['checkpoints'];
+    resumeCheckpoints?: { commit: string; n: number }[];
   },
 ) {
   const events: AgentEvent[] = [];
@@ -68,6 +71,7 @@ function session(
     autoApprove: () => !!opts.auto,
     contextLength: async () => (typeof loaded === 'function' ? loaded() : loaded),
     unload: opts.unload,
+    checkpoints: opts.checkpoints,
   };
   const s = new AgentSession(
     {
@@ -79,6 +83,7 @@ function session(
       permissionMode: opts.mode ?? 'default',
       capabilities: opts.caps ?? ['completion', 'tools'],
       history: opts.history,
+      checkpoints: opts.resumeCheckpoints,
     },
     deps,
   );
@@ -543,4 +548,64 @@ test('think is only sent to thinking models', () => {
   assert.equal(thinkParam('off', ['thinking']), false);
   assert.equal(thinkParam('high', ['thinking']), 'high');
   assert.equal(thinkParam('', ['thinking']), undefined);
+});
+
+test('a checkpoint before each message lets the user roll the files back, and the model is told', async () => {
+  const cwd = tmp();
+  const data = tmp();
+  writeFileSync(path.join(cwd, 'a.txt'), 'v1\n');
+  const store = new SessionStore(data);
+  const checkpoints = new CheckpointStore(data);
+  const { chat, requests } = scripted(reply('', [call('c1', 'Write', { file_path: 'b.txt', content: 'new\n' })]), reply('done'), reply('ok'));
+  const { s, events } = session(chat, { cwd, mode: 'acceptEdits', store, checkpoints });
+  await s.sendUser('make b');
+  const first = last(events, 'checkpoint')!;
+  assert.deepEqual([first.n, first.reason, first.changed], [1, 'prompt', 0]);
+  assert.equal(readFileSync(path.join(cwd, 'b.txt'), 'utf8'), 'new\n');
+
+  await s.restoreCheckpoint(first.commit);
+  assert.ok(!existsSync(path.join(cwd, 'b.txt')), 'the file made after the checkpoint is gone');
+  const backup = last(events, 'checkpoint')!;
+  assert.deepEqual([backup.n, backup.reason], [2, 'backup']);
+  assert.equal(last(events, 'restore')!.phase, 'done');
+  assert.match(ja(last(events, 'notice')!.text), /チェックポイント #1 に戻しました（1 ファイルを削除）/);
+
+  await s.sendUser('next');
+  const sent = requests.at(-1)!.messages.slice(-2);
+  assert.ok(sent[0].role === 'user' && sent[0].content.startsWith(RESTORED_HEADER), 'the model hears about the restore');
+  assert.deepEqual(sent[1], { role: 'user', content: 'next' });
+
+  // Saved and replayed with the session, and still restorable after resuming.
+  const records = (await store.load(SESSION))!;
+  assert.deepEqual(toEvents(records).events.filter((e) => e.type === 'checkpoint').map((e) => e.type === 'checkpoint' && e.n), [1, 2, 3]);
+  const resumed = session(scripted().chat, { cwd, store, checkpoints, resumeCheckpoints: checkpointsOf(records), history: toMessages(records) });
+  assert.ok(resumed.s.hasCheckpoint(first.commit));
+  await resumed.s.restoreCheckpoint(backup.commit);
+  assert.equal(readFileSync(path.join(cwd, 'b.txt'), 'utf8'), 'new\n', 'undoing the restore brings the file back');
+});
+
+test('long turns get checkpoints along the way, but only when files changed', async () => {
+  const cwd = tmp();
+  const writes = Array.from({ length: CHECKPOINT_EVERY }, (_, i) => call(`w${i}`, 'Write', { file_path: `f${i}.txt`, content: `${i}` }));
+  const { chat } = scripted(reply('', writes), reply('done'));
+  const { s, events } = session(chat, { cwd, mode: 'acceptEdits', checkpoints: new CheckpointStore(tmp()) });
+  await s.sendUser('write many');
+  const cps = events.filter((e): e is Extract<AgentEvent, { type: 'checkpoint' }> => e.type === 'checkpoint');
+  assert.deepEqual(cps.map((c) => [c.reason, c.changed]), [['prompt', 0], ['progress', CHECKPOINT_EVERY]]);
+});
+
+test('no checkpoints in plan mode, and a failing checkpoint does not stop the task', async () => {
+  const cwd = tmp();
+  const plan = session(scripted(reply('plan')).chat, { cwd, mode: 'plan', checkpoints: new CheckpointStore(tmp()) });
+  await plan.s.sendUser('plan');
+  assert.ok(!plan.events.some((e) => e.type === 'checkpoint'));
+
+  let attempts = 0;
+  const broken = { snapshot: async () => { attempts++; throw new TextError(msg('checkpoint.noGit')); } } as unknown as CheckpointStore;
+  const { s, events } = session(scripted(reply('one'), reply('two')).chat, { cwd, checkpoints: broken });
+  await s.sendUser('first');
+  await s.sendUser('second');
+  assert.equal(attempts, 1, 'a permanent failure turns checkpoints off for the session');
+  assert.deepEqual(events.filter((e) => e.type === 'notice').map((e) => e.type === 'notice' && ja(e.text)), ['このフォルダではチェックポイントを記録しません: git が見つかりません']);
+  assert.equal(last(events, 'result')!.subtype, 'success');
 });

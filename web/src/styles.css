@@ -264,6 +264,20 @@ pre.diff .ctx { color: var(--muted); }
 .thinking-dots .hint-muted { margin-top: 2px; }
 .continue { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
 
+.checkpoint { border-left: 3px solid var(--accent); border-radius: 6px; background: var(--sidebar); padding: 4px 10px; font-size: 12px; }
+.checkpoint-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.checkpoint-title { flex: 1; min-width: 0; }
+.checkpoint-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.checkpoint-files { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow: auto; }
+.checkpoint-files .file-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 2px 4px; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.checkpoint-files .file-row:hover, .checkpoint-files .file-row.selected { background: var(--panel); }
+.checkpoint-files code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.checkpoint-files pre.diff { margin: 2px 0 6px; max-height: 40vh; overflow: auto; }
+.badge.added { color: var(--ok); border-color: var(--ok); }
+.badge.deleted { color: var(--ng); border-color: var(--ng); }
+.badge.modified { color: var(--muted); }
+.checkpoint-confirm { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--warn-border); border-radius: 6px; background: var(--warn-bg); }
+
 .composer { display: flex; flex-direction: column; gap: 6px; padding: 12px max(16px, calc((100% - 860px) / 2)); border-top: 1px solid var(--border); background: var(--panel); }
 .composer-row { display: flex; gap: 8px; }
 .composer textarea { resize: vertical; min-height: 44px; max-height: 40vh; }

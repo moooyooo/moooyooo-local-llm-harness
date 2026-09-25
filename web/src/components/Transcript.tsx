@@ -6,6 +6,7 @@ import { t, tNodes, tx } from '../i18n';
 import { imageFiles, type Attachment } from '../images';
 import { pendingPermissions, type Item, type PermissionItem, type Tab } from '../state';
 import { formatDuration, formatTokens, lineDiff, summarizeInput, truncate } from '../util';
+import { CheckpointRow, type CheckpointHandlers } from './Checkpoint';
 
 export type PermissionHandler = (id: string, allow: boolean) => void;
 
@@ -13,10 +14,11 @@ export type PermissionHandler = (id: string, allow: boolean) => void;
 const QUIET_SHOW = 10;
 const QUIET_HINT = 60;
 
-export function Transcript({ tab, onPermission, onSend }: {
+export function Transcript({ tab, onPermission, onSend, checkpoint }: {
   tab: Tab;
   onPermission: PermissionHandler;
   onSend: (text: string) => void;
+  checkpoint: CheckpointHandlers;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -42,7 +44,13 @@ export function Transcript({ tab, onPermission, onSend }: {
           {tab.session && !tab.session.tools && <div className="hint">{t('transcript.noTools')}</div>}
         </div>
       )}
-      {tab.items.map((it) => <ItemView key={it.id} item={it} onPermission={onPermission} />)}
+      {tab.items.map((it) =>
+        it.kind === 'checkpoint' ? (
+          <CheckpointRow key={it.id} item={it} tab={tab} handlers={checkpoint} />
+        ) : (
+          <ItemView key={it.id} item={it} onPermission={onPermission} />
+        ),
+      )}
       {tab.streamThinking && (
         <details className="thinking streaming" open>
           <summary>{t('transcript.thinkingLive')}</summary>
@@ -89,7 +97,7 @@ function Waiting({ since, streaming, compacting }: { since: number; streaming: b
   );
 }
 
-function ItemView({ item, onPermission }: { item: Item; onPermission: PermissionHandler }) {
+function ItemView({ item, onPermission }: { item: Exclude<Item, { kind: 'checkpoint' }>; onPermission: PermissionHandler }) {
   switch (item.kind) {
     case 'user':
       return (

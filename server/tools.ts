@@ -42,8 +42,11 @@ const MAX_READ_BYTES = 20 * 1024 * 1024;
 const BASH_DEFAULT_TIMEOUT = 120_000;
 const BASH_MAX_TIMEOUT = 600_000;
 const MAX_LIST = 200;
-/** Dependency / VCS folders that Glob and Grep skip (ripgrep's .gitignore handling only works inside git repos). */
-const SKIP_DIRS = new Set(['node_modules', '.git', '.venv', 'venv', '__pycache__', '.next', '.cache']);
+/**
+ * Dependency / VCS folders that Glob and Grep skip (ripgrep's .gitignore handling only works inside git repos),
+ * and that checkpoints leave out.
+ */
+export const SKIP_DIRS = new Set(['node_modules', '.git', '.venv', 'venv', '__pycache__', '.next', '.cache']);
 
 const IS_WINDOWS = process.platform === 'win32';
 /** The shell tool is `Bash` on macOS/Linux and `PowerShell` on Windows (as in Claude Code). */

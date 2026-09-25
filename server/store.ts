@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentEvent, FolderSummary, PermissionMode, SessionSummary, ThinkSetting, ToolCall } from '../shared/protocol.js';
+import type { AgentEvent, CheckpointReason, FolderSummary, PermissionMode, SessionSummary, ThinkSetting, ToolCall } from '../shared/protocol.js';
 import { msg, type Msg, type Text } from '../shared/i18n/index.js';
 import type { OllamaMessage } from './ollama.js';
 
@@ -39,7 +39,9 @@ export type SessionRecord =
    * The conversation was compacted: from here on it is `messages` (the summary and the messages kept as they were).
    * Earlier records stay in the file for the GUI's history.
    */
-  | { type: 'compact'; messages: OllamaMessage[]; summary: string; auto: boolean; tokensBefore: number; tokensAfter: number; timestamp: string };
+  | { type: 'compact'; messages: OllamaMessage[]; summary: string; auto: boolean; tokensBefore: number; tokensAfter: number; timestamp: string }
+  /** The working folder's files were recorded in the checkpoint repository (see server/checkpoints.ts). */
+  | { type: 'checkpoint'; commit: string; n: number; reason: CheckpointReason; changed: number; excluded?: string[]; timestamp: string };
 
 export class SessionStore {
   readonly dir: string;
@@ -142,6 +144,11 @@ function summarize(sessionId: string, text: string, mtime: Date): SessionSummary
   return s.promptCount > 0 ? s : null;
 }
 
+/** A resumed session's checkpoints, so they can still be restored. */
+export function checkpointsOf(records: SessionRecord[]): { commit: string; n: number }[] {
+  return records.flatMap((r) => (r.type === 'checkpoint' ? [{ commit: r.commit, n: r.n }] : []));
+}
+
 /** The conversation to send to Ollama when resuming. */
 export function toMessages(records: SessionRecord[]): OllamaMessage[] {
   let messages: OllamaMessage[] = [];
@@ -183,6 +190,10 @@ export function toEvents(records: SessionRecord[]): { events: AgentEvent[]; omit
       settings = next;
     }
     if (r.type === 'result') events.push(r.result);
+    if (r.type === 'checkpoint') {
+      const { commit, n, reason, changed, excluded, timestamp } = r;
+      events.push({ type: 'checkpoint', commit, n, reason, changed, at: timestamp, ...(excluded && { excluded }) });
+    }
     if (r.type === 'compact') {
       const { summary, auto, tokensBefore, tokensAfter } = r;
       events.push({ type: 'compact', phase: 'done', summary, auto, tokensBefore, tokensAfter });

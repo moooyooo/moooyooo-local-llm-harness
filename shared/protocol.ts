@@ -49,6 +49,11 @@ export type ClientMessage =
   | { type: 'stop'; key: string }
   /** Summarize the conversation now (the 「会話を要約」 button). */
   | { type: 'compact'; key: string }
+  /** Files changed since a checkpoint of this session, or the diff of one of them (`path`). */
+  | { type: 'checkpointChanges'; key: string; commit: string }
+  | { type: 'checkpointPatch'; key: string; commit: string; path: string }
+  /** Put the working folder's files back as they were at a checkpoint (between turns). */
+  | { type: 'restoreCheckpoint'; key: string; commit: string }
   | { type: 'listSessions' }
   /** Installed and loaded models, and the Ollama connection state. */
   | { type: 'listModels' }
@@ -94,6 +99,21 @@ export interface ToolCall {
   input: Record<string, unknown>;
 }
 
+/** A file that differs between a checkpoint and the working folder now. Counts are lines; absent for binary files. */
+export interface FileChange {
+  path: string;
+  /** From the checkpoint to now: `added` = created since (a restore deletes it). */
+  status: 'added' | 'modified' | 'deleted';
+  added?: number;
+  deleted?: number;
+}
+
+/**
+ * Why a checkpoint was taken: before a user message, during a long turn after several file changes,
+ * or just before a restore (so the restore can be undone).
+ */
+export type CheckpointReason = 'prompt' | 'progress' | 'backup';
+
 /** Token counts and speed of the last model call in a turn. */
 export interface TurnStats {
   promptTokens: number;
@@ -129,6 +149,13 @@ export type AgentEvent =
   | { type: 'permission'; id: string; toolName: string; input: Record<string, unknown>; description?: string; approval: ApprovalInfo }
   /** A pending permission prompt was closed without the user's answer (interrupt / stop). */
   | { type: 'permissionCancelled'; id: string }
+  /**
+   * The working folder's files were recorded (`n`: numbered per session). `changed`: files that differ from the
+   * previous checkpoint. `excluded`: paths newly left out of checkpoints (git repositories inside, large files).
+   */
+  | { type: 'checkpoint'; commit: string; n: number; reason: CheckpointReason; changed: number; at: string; excluded?: string[] }
+  /** A restore finished or failed (live only; the transcript shows its outcome as a notice). */
+  | { type: 'restore'; commit: string; phase: 'done' | 'failed'; message?: Text }
   | { type: 'result'; isError: boolean; subtype: 'success' | 'interrupted' | 'error' | 'max_turns'; message?: Text; durationMs: number; numTurns: number; stats?: TurnStats };
 
 export interface ModelInfo {
@@ -193,5 +220,8 @@ export type ServerMessage =
   | { type: 'sessions'; sessions: SessionSummary[]; folders: FolderSummary[] }
   /** Past transcript of a resumed session. */
   | { type: 'history'; key: string; sessionId: string; events: AgentEvent[]; omitted: number }
+  /** Answers to `checkpointChanges` / `checkpointPatch`. */
+  | { type: 'checkpointChanges'; key: string; commit: string; files: FileChange[]; truncated: boolean; error?: Text }
+  | { type: 'checkpointPatch'; key: string; commit: string; path: string; patch: string; truncated: boolean; error?: Text }
   /** `key` is absent for connection-level errors. */
   | { type: 'error'; key?: string; message: Text };

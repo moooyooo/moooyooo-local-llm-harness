@@ -10,8 +10,9 @@ import { msg as text, TextError, type Text } from '../shared/i18n/index.js';
 import { MAX_IMAGE_BASE64, MAX_IMAGES } from '../shared/protocol.js';
 import type { ClientMessage, PermissionMode, ServerMessage, SessionSettings, ThinkSetting } from '../shared/protocol.js';
 import { AgentSession, type AgentConfig } from './agent.js';
+import { CheckpointStore } from './checkpoints.js';
 import { chat, describeError, getStatus, listLoaded, listModels, modelCapabilities, OLLAMA_URL, unloadModel } from './ollama.js';
-import { DATA_DIR, listFolders, SessionStore, toEvents, toMessages } from './store.js';
+import { checkpointsOf, DATA_DIR, listFolders, SessionStore, toEvents, toMessages } from './store.js';
 import { SEARXNG_URL, searxngReachable } from './web.js';
 
 const HOST = '127.0.0.1';
@@ -33,6 +34,10 @@ const ALLOWED_ORIGINS = new Set(
 );
 
 const store = new SessionStore();
+const checkpoints = new CheckpointStore();
+checkpoints.prune().catch((err) => console.error(`古いチェックポイントの削除に失敗: ${err}`));
+
+const errorText = (err: unknown): Text => (err instanceof TextError ? err.text : String(err));
 
 /** Validated session settings plus the model's capabilities. Throws a message for the user. */
 async function resolveSettings(o: SessionSettings) {
@@ -124,7 +129,7 @@ wss.on('connection', (ws: WebSocket) => {
     try {
       settings = await resolveSettings(o);
     } catch (err) {
-      return send({ type: 'error', key, message: err instanceof TextError ? err.text : String(err) });
+      return send({ type: 'error', key, message: errorText(err) });
     }
     const records = o.resume ? await store.load(o.resume) : undefined;
     if (o.resume && !records) return send({ type: 'error', key, message: text('error.noHistory', { id: o.resume }) });
@@ -141,6 +146,7 @@ wss.on('connection', (ws: WebSocket) => {
         cwd,
         ...settings,
         history: records ? toMessages(records) : undefined,
+        checkpoints: records ? checkpointsOf(records) : undefined,
       },
       {
         chat,
@@ -148,6 +154,7 @@ wss.on('connection', (ws: WebSocket) => {
         autoApprove: () => autoApprove,
         contextLength: async (model) => (await listLoaded()).find((m) => m.name === model)?.contextLength,
         unload: (model, signal) => unloadModel(model, signal),
+        checkpoints,
       },
     );
     s.on('event', (ev) => send({ type: 'event', key, ev }));
@@ -207,7 +214,7 @@ wss.on('connection', (ws: WebSocket) => {
           .then((settings) => {
             if (!s.configure(settings)) send({ type: 'error', key: msg.key, message: text('error.busyConfigure') });
           })
-          .catch((err) => send({ type: 'error', key: msg.key, message: err instanceof TextError ? err.text : String(err) }));
+          .catch((err) => send({ type: 'error', key: msg.key, message: errorText(err) }));
         break;
       }
       case 'permission':
@@ -218,6 +225,35 @@ wss.on('connection', (ws: WebSocket) => {
         if (!s) return send({ type: 'error', key: msg.key, message: text('error.notStarted') });
         if (s.busy) return send({ type: 'error', key: msg.key, message: text('error.busyCompact') });
         s.compactNow().catch((err) => send({ type: 'error', key: msg.key, message: String(err) }));
+        break;
+      }
+      case 'checkpointChanges':
+      case 'checkpointPatch':
+      case 'restoreCheckpoint': {
+        const s = sessions.get(msg.key);
+        if (!s) return send({ type: 'error', key: msg.key, message: text('error.notStarted') });
+        // Only this session's own checkpoints (which also keeps the commit a plain hash).
+        if (typeof msg.commit !== 'string' || !s.hasCheckpoint(msg.commit)) {
+          return send({ type: 'error', key: msg.key, message: text('checkpoint.unknown') });
+        }
+        const { key, commit } = msg;
+        const cwd = s.config.cwd;
+        if (msg.type === 'restoreCheckpoint') {
+          if (s.busy) return send({ type: 'error', key, message: text('error.busyRestore') });
+          s.restoreCheckpoint(commit).catch((err) => send({ type: 'error', key, message: String(err) }));
+        } else if (msg.type === 'checkpointChanges') {
+          checkpoints
+            .changes(cwd, commit)
+            .then((r) => send({ type: 'checkpointChanges', key, commit, ...r }))
+            .catch((err) => send({ type: 'checkpointChanges', key, commit, files: [], truncated: false, error: errorText(err) }));
+        } else {
+          const file = msg.path;
+          if (typeof file !== 'string' || !file || file.length > 4096) return;
+          checkpoints
+            .patch(cwd, commit, file)
+            .then((r) => send({ type: 'checkpointPatch', key, commit, path: file, ...r }))
+            .catch((err) => send({ type: 'checkpointPatch', key, commit, path: file, patch: '', truncated: false, error: errorText(err) }));
+        }
         break;
       }
       case 'interrupt':

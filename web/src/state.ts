@@ -1,5 +1,7 @@
 import type {
   AgentEvent,
+  CheckpointReason,
+  FileChange,
   FolderSummary,
   LoadedModel,
   ModelInfo,
@@ -52,9 +54,20 @@ export type Item =
   /** Kept as `Text`, so it follows the language when that changes. */
   | { kind: 'notice'; id: string; level: 'info' | 'error'; text: Text }
   /** Older messages were replaced by this summary (estimated prompt tokens before → after). */
-  | { kind: 'compact'; id: string; auto: boolean; summary: string; tokensBefore?: number; tokensAfter?: number };
+  | { kind: 'compact'; id: string; auto: boolean; summary: string; tokensBefore?: number; tokensAfter?: number }
+  /** The working folder's files were recorded; they can be put back to this point. `at`: ISO time. */
+  | { kind: 'checkpoint'; id: string; commit: string; n: number; reason: CheckpointReason; changed: number; at: string; excluded?: string[] };
 
 export type PermissionItem = Extract<Item, { kind: 'permission' }>;
+export type CheckpointItem = Extract<Item, { kind: 'checkpoint' }>;
+
+/** What changed since a checkpoint, as last fetched (`files` undefined = loading), and diffs of single files. */
+export interface CheckpointData {
+  files?: FileChange[];
+  truncated?: boolean;
+  error?: Text;
+  patches: Record<string, { patch?: string; truncated?: boolean; error?: Text }>;
+}
 
 export interface SessionInfo {
   sessionId: string;
@@ -89,6 +102,10 @@ export interface Tab {
   lastActivity?: number;
   /** The model is summarizing the conversation. */
   compacting?: boolean;
+  /** Changes since each checkpoint, by commit, fetched when the user opens them. */
+  checkpointData: Record<string, CheckpointData>;
+  /** Commit of the checkpoint being restored. */
+  restoring?: string;
   /** A turn finished while another tab was active. Cleared when the tab is shown. */
   unread: boolean;
 }
@@ -119,7 +136,7 @@ export function newTabKey(): string {
 }
 
 export function newTab(cwd: string, key = newTabKey()): Tab {
-  return { key, cwd, running: false, busy: false, items: [], streamText: '', streamThinking: '', unread: false };
+  return { key, cwd, running: false, busy: false, items: [], streamText: '', streamThinking: '', unread: false, checkpointData: {} };
 }
 
 export function createInitialState(cwd: string): State {
@@ -161,7 +178,10 @@ export type Action =
   | { type: 'markUnread'; key: string }
   /** `images`: data URLs of the attached images. */
   | { type: 'userSent'; key: string; text: string; images?: string[]; at: number }
-  | { type: 'permissionAnswered'; key: string; id: string; allow: boolean };
+  | { type: 'permissionAnswered'; key: string; id: string; allow: boolean }
+  | { type: 'checkpointRequested'; key: string; commit: string }
+  | { type: 'patchRequested'; key: string; commit: string; path: string }
+  | { type: 'restoreRequested'; key: string; commit: string };
 
 let seq = 0;
 const nextId = () => `i${++seq}`;
@@ -175,7 +195,7 @@ export function reducer(state: State, action: Action): State {
         connected: action.value,
         tabs: action.value
           ? state.tabs
-          : state.tabs.map((t) => ({ ...t, running: false, busy: false, compacting: false, streamText: '', streamThinking: '' })),
+          : state.tabs.map((t) => ({ ...t, running: false, busy: false, compacting: false, restoring: undefined, streamText: '', streamThinking: '' })),
       };
     case 'newTab':
       return { ...state, tabs: [...state.tabs, newTab(action.cwd, action.key)], activeKey: action.key };
@@ -211,9 +231,22 @@ export function reducer(state: State, action: Action): State {
           it.kind === 'permission' && it.id === action.id ? { ...it, status: action.allow ? 'allowed' : 'denied' } : it,
         ),
       }));
+    case 'checkpointRequested':
+      return updateTab(state, action.key, (t) => ({ ...t, checkpointData: { ...t.checkpointData, [action.commit]: { patches: {} } } }));
+    case 'patchRequested':
+      return updateCheckpoint(state, action.key, action.commit, (d) => ({ ...d, patches: { ...d.patches, [action.path]: {} } }));
+    case 'restoreRequested':
+      return updateTab(state, action.key, (t) => ({ ...t, busy: true, restoring: action.commit }));
     case 'server':
       return onServer(state, action.msg, action.at);
   }
+}
+
+function updateCheckpoint(state: State, key: string, commit: string, fn: (d: CheckpointData) => CheckpointData): State {
+  return updateTab(state, key, (t) => {
+    const d = t.checkpointData[commit];
+    return d ? { ...t, checkpointData: { ...t.checkpointData, [commit]: fn(d) } } : t;
+  });
 }
 
 function updateTab(state: State, key: string, fn: (t: Tab) => Tab): State {
@@ -237,11 +270,14 @@ function onServer(state: State, msg: ServerMessage, at: number): State {
       return { ...state, sessions: msg.sessions, folders: msg.folders };
     case 'status':
       return updateTab(state, msg.key, (t) =>
-        msg.running ? { ...t, running: true } : { ...t, running: false, busy: false, compacting: false, streamText: '', streamThinking: '' },
+        msg.running
+          ? { ...t, running: true }
+          : { ...t, running: false, busy: false, compacting: false, restoring: undefined, streamText: '', streamThinking: '' },
       );
     case 'error':
       return updateTab(state, msg.key ?? state.activeKey, (t) =>
-        pushItems(t, { kind: 'notice', id: nextId(), level: 'error', text: msg.message }),
+        // A refused restore (e.g. busy) never gets its own answer.
+        pushItems(t.restoring ? { ...t, busy: false, restoring: undefined } : t, { kind: 'notice', id: nextId(), level: 'error', text: msg.message }),
       );
     case 'history':
       return updateTab(state, msg.key, (t) => {
@@ -253,6 +289,14 @@ function onServer(state: State, msg: ServerMessage, at: number): State {
     case 'event': {
       const unread = msg.ev.type === 'result' && msg.key !== state.activeKey;
       return updateTab(state, msg.key, (t) => ({ ...onEvent(t, msg.ev), lastActivity: at, ...(unread && { unread: true }) }));
+    }
+    case 'checkpointChanges': {
+      const { files, truncated, error } = msg;
+      return updateCheckpoint(state, msg.key, msg.commit, (d) => ({ ...d, files, truncated, error }));
+    }
+    case 'checkpointPatch': {
+      const { patch, truncated, error } = msg;
+      return updateCheckpoint(state, msg.key, msg.commit, (d) => ({ ...d, patches: { ...d.patches, [msg.path]: { patch, truncated, error } } }));
     }
   }
 }
@@ -324,6 +368,16 @@ function onEvent(tab: Tab, ev: AgentEvent): Tab {
         reason: ev.approval.reason,
         security: ev.approval.security,
       });
+    case 'checkpoint': {
+      const { commit, n, reason, changed, at, excluded } = ev;
+      return pushItems(tab, { kind: 'checkpoint', id: nextId(), commit, n, reason, changed, at, excluded });
+    }
+    case 'restore': {
+      const next = { ...tab, busy: false, restoring: undefined };
+      if (ev.phase === 'done') return next;
+      const reason = ev.message ?? text('common.unknownError');
+      return pushItems(next, { kind: 'notice', id: nextId(), level: 'error', text: text('checkpoint.restoreFailed', { reason }) });
+    }
     case 'permissionCancelled':
       return {
         ...tab,
