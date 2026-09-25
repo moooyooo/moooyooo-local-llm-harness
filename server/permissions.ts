@@ -11,7 +11,7 @@ import {
   shellKindOf,
 } from './autoApprove.js';
 import { scanBeforeGit } from './secretScan.js';
-import { isReadOnlyTool } from './tools.js';
+import { isReadOnlyTool, isWebTool } from './tools.js';
 
 /**
  * Whether a tool call runs silently, needs the user's permission, or is refused, by permission mode.
@@ -23,7 +23,14 @@ export type Gate = { kind: 'allow' } | { kind: 'ask' } | { kind: 'deny'; message
 const ALLOW: Gate = { kind: 'allow' };
 const ASK: Gate = { kind: 'ask' };
 
-export function gate(mode: PermissionMode, toolName: string, input: Record<string, unknown>, cwd: string): Gate {
+/** `web`: the session turned web access on. */
+export function gate(mode: PermissionMode, toolName: string, input: Record<string, unknown>, cwd: string, web = false): Gate {
+  // Queries and URLs leave the machine, so web tools ask (auto-approval may answer) even in plan mode.
+  if (isWebTool(toolName)) {
+    if (!web) return { kind: 'deny', message: 'Web access is turned off in this session, so this tool is not available.' };
+    return mode === 'bypassPermissions' ? ALLOW : ASK;
+  }
+
   if (mode === 'plan' && !isReadOnlyTool(toolName)) {
     return { kind: 'deny', message: 'Plan mode is read-only, so this tool is not available. Present your plan to the user instead.' };
   }

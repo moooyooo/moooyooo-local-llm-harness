@@ -18,6 +18,8 @@ export interface SessionSettings {
   /** Ollama `num_ctx`. Omitted = Ollama's default for the model. */
   numCtx?: number;
   permissionMode?: PermissionMode;
+  /** Offer WebSearch / WebFetch (through the local SearXNG). */
+  web?: boolean;
 }
 
 export interface StartOptions extends SessionSettings {
@@ -107,7 +109,7 @@ export interface TurnStats {
  * replayed with the same shapes in a `history` message.
  */
 export type AgentEvent =
-  | { type: 'init'; sessionId: string; model: string; cwd: string; permissionMode: PermissionMode; think: ThinkSetting; numCtx?: number; tools: boolean }
+  | { type: 'init'; sessionId: string; model: string; cwd: string; permissionMode: PermissionMode; think: ThinkSetting; numCtx?: number; web: boolean; tools: boolean }
   /** Streamed text / thinking of the assistant message being generated. */
   | { type: 'delta'; channel: 'text' | 'thinking'; text: string }
   /** The user's prompt (only replayed from history; the GUI shows live prompts itself). `images` as in `ClientMessage`. */
@@ -182,7 +184,8 @@ export interface FolderSummary {
 
 export type ServerMessage =
   | { type: 'hello'; defaultCwd: string; dataDir: string }
-  | { type: 'models'; ollama: OllamaStatus; models: ModelInfo[]; loaded: LoadedModel[] }
+  /** `searxng`: whether the local SearXNG behind WebSearch answers. */
+  | { type: 'models'; ollama: OllamaStatus; models: ModelInfo[]; loaded: LoadedModel[]; searxng?: { url: string; ok: boolean } }
   | { type: 'event'; key: string; ev: AgentEvent }
   | { type: 'status'; key: string; running: boolean }
   | { type: 'sessions'; sessions: SessionSummary[]; folders: FolderSummary[] }

@@ -47,6 +47,8 @@ export interface AgentConfig {
   think: ThinkSetting;
   numCtx?: number;
   permissionMode: PermissionMode;
+  /** WebSearch / WebFetch are offered. */
+  web?: boolean;
   /** From `/api/show`; decides whether tools and `think` are sent. */
   capabilities: string[];
   /** Conversation to continue when resuming. */
@@ -58,8 +60,10 @@ export interface AgentDeps {
   store?: SessionStore;
   /** Connection-wide auto-approval setting, read at each prompt. */
   autoApprove: () => boolean;
-  /** Context window of the loaded model, used when `numCtx` isn't set. */
+  /** Context window the model is loaded with; undefined when it isn't loaded. */
   contextLength?: (model: string) => Promise<number | undefined>;
+  /** Frees the model and waits until it's gone (false if it's still loaded), so it loads again with our `num_ctx`. */
+  unload?: (model: string, signal: AbortSignal) => Promise<boolean>;
   /** Overrides the classifier + security scan (tests). */
   assess?: typeof assess;
 }
@@ -87,6 +91,8 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   private baseline?: { tokens: number; messages: number };
   /** The user's latest prompt, repeated word for word in a summary that replaces it. */
   private lastPrompt?: string;
+  /** `model@num_ctx` already reloaded once, so a window Ollama keeps smaller (e.g. for memory) isn't retried forever. */
+  private reloadedFor?: string;
 
   constructor(config: AgentConfig, deps: AgentDeps) {
     super();
@@ -96,7 +102,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     this.lastPrompt = this.messages.findLast((m) => m.role === 'user' && !isHarnessMessage(m.content))?.content;
     this.tools = config.capabilities.includes('tools');
     // Built once: a stable prompt prefix lets Ollama reuse its KV cache between calls.
-    this.systemPrompt = buildSystemPrompt({ cwd: config.cwd, permissionMode: config.permissionMode, tools: this.tools });
+    this.systemPrompt = buildSystemPrompt({ cwd: config.cwd, permissionMode: config.permissionMode, tools: this.tools, web: !!config.web });
   }
 
   get busy(): boolean {
@@ -106,7 +112,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   /** Reports the session settings. Call after attaching listeners. */
   init() {
     const { sessionId, model, cwd, permissionMode, think, numCtx } = this.config;
-    this.send({ type: 'init', sessionId, model, cwd, permissionMode, think, numCtx, tools: this.tools });
+    this.send({ type: 'init', sessionId, model, cwd, permissionMode, think, numCtx, web: !!this.config.web, tools: this.tools });
   }
 
   /** `images`: base64 PNG / JPEG, for models with the `vision` capability. */
@@ -130,6 +136,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
           break;
         }
         turns++;
+        await this.ensureContext(ctrl.signal);
         await this.compactIfFull(ctrl.signal);
         const sent = this.messages.length;
         const res = await this.callModel(ctrl.signal);
@@ -177,9 +184,8 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     } finally {
       this.abort = undefined;
     }
-    if (result.stats && !result.stats.contextMax) {
-      result.stats.contextMax = await this.deps.contextLength?.(this.config.model).catch(() => undefined);
-    }
+    // The window actually in use, which can be smaller than the requested num_ctx.
+    if (result.stats) result.stats.contextMax = (await this.contextLimit()) ?? result.stats.contextMax;
     this.persist({ type: 'result', result, timestamp: new Date().toISOString() });
     this.send(result);
   }
@@ -219,13 +225,13 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
    * Applies new settings from the next model call (not during a turn). A model or context change makes Ollama
    * reload the model; any change rebuilds the system prompt.
    */
-  configure(next: Pick<AgentConfig, 'model' | 'think' | 'numCtx' | 'permissionMode' | 'capabilities'>): boolean {
+  configure(next: Pick<AgentConfig, 'model' | 'think' | 'numCtx' | 'permissionMode' | 'web' | 'capabilities'>): boolean {
     if (this.abort) return false;
     const change = describeSettingsChange({ ...this.config, numCtx: this.config.numCtx ?? 0 }, { ...next, numCtx: next.numCtx ?? 0 });
     if (!change) return true;
     Object.assign(this.config, next);
     this.tools = next.capabilities.includes('tools');
-    this.systemPrompt = buildSystemPrompt({ cwd: this.config.cwd, permissionMode: next.permissionMode, tools: this.tools });
+    this.systemPrompt = buildSystemPrompt({ cwd: this.config.cwd, permissionMode: next.permissionMode, tools: this.tools, web: !!next.web });
     this.baseline = undefined;
     if (this.metaWritten) this.writeMeta();
     this.init();
@@ -252,7 +258,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   }
 
   private toolDefs(): OllamaTool[] | undefined {
-    return this.tools ? toolSchemas(this.config.permissionMode === 'plan') : undefined;
+    return this.tools ? toolSchemas(this.config.permissionMode === 'plan', !!this.config.web) : undefined;
   }
 
   /**
@@ -270,6 +276,24 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     const b = this.baseline;
     if (b && b.messages <= this.messages.length) return b.tokens + messagesTokens(this.messages.slice(b.messages));
     return requestTokens(this.systemPrompt, this.toolDefs(), this.messages);
+  }
+
+  /**
+   * Ollama reuses a loaded MLX model whatever `num_ctx` is asked for, so a model loaded with a smaller window (by an
+   * earlier session or another device) would silently run with it. Free it so the next call loads it with ours.
+   */
+  private async ensureContext(signal: AbortSignal) {
+    const { model, numCtx } = this.config;
+    if (!numCtx || !this.deps.unload) return;
+    const loaded = await this.deps.contextLength?.(model).catch(() => undefined);
+    const key = `${model}@${numCtx}`;
+    if (!loaded || loaded >= numCtx || this.reloadedFor === key) return;
+    this.send({ type: 'notice', text: `Ollama が ${model} を ${formatK(loaded)} で読み込んでいたため、${formatK(numCtx)} で読み込み直します` });
+    if (await this.deps.unload(model, signal)) {
+      this.reloadedFor = key;
+    } else if (!signal.aborted) {
+      this.send({ type: 'notice', text: `ほかの処理が終わらないため、今回は ${formatK(loaded)} のまま続けます` });
+    }
   }
 
   private async compactIfFull(signal: AbortSignal) {
@@ -386,7 +410,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
 
     const { cwd, permissionMode } = this.config;
     const ctx = { cwd, signal, readFiles: this.readFiles };
-    const g = gate(permissionMode, call.name, call.input, cwd);
+    const g = gate(permissionMode, call.name, call.input, cwd, !!this.config.web);
     if (g.kind === 'deny') return { output: g.message, isError: true };
     // Don't ask the user about a call that would fail anyway (e.g. Edit before Read).
     const invalid = await validateTool(call.name, call.input, ctx);
@@ -455,8 +479,8 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     const { store } = this.deps;
     if (!store) return;
     this.metaWritten = true;
-    const { sessionId, cwd, model, think, numCtx, permissionMode } = this.config;
-    store.append(sessionId, { type: 'meta', sessionId, cwd, model, think, numCtx: numCtx ?? 0, permissionMode, timestamp: new Date().toISOString() });
+    const { sessionId, cwd, model, think, numCtx, permissionMode, web } = this.config;
+    store.append(sessionId, { type: 'meta', sessionId, cwd, model, think, numCtx: numCtx ?? 0, permissionMode, web: !!web, timestamp: new Date().toISOString() });
   }
 
   private send(ev: AgentEvent) {
@@ -480,6 +504,8 @@ export function thinkParam(setting: ThinkSetting, capabilities: string[]): ChatR
       return undefined;
   }
 }
+
+const formatK = (tokens: number) => `${Math.round(tokens / 1024)}K`;
 
 function withoutImages(m: OllamaMessage): OllamaMessage {
   if (m.role !== 'user' || !m.images?.length) return m;

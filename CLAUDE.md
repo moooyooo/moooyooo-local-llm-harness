@@ -33,7 +33,9 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
   generation (Ollama silently shifts the context and ends with `stop`). Images go in a user message's `images` as plain
   base64 (a `data:` prefix is an error) and cost about width × height / 1024 tokens; a model without the `vision`
   capability answers HTTP 400 to any image in the conversation, so `AgentSession.request` replaces them with a note.
-  A model already loaded with a larger context is reused for a smaller `num_ctx`.
+  A loaded MLX (safetensors) model is reused whatever `num_ctx` a request asks for (GGUF models reload; see `needsReload`
+  in Ollama's server/sched.go), so `AgentSession.ensureContext` frees a model loaded with a smaller window
+  (`keep_alive: 0`, which lets a running request finish first) before calling it.
 - `server/tools.ts`: Read / Write / Edit / Bash (PowerShell on Windows) / Glob / Grep / LS. Names and parameters follow
   Claude Code's tools so models use them naturally and `autoApprove.ts` classifies them unchanged. `validate` runs before
   the permission prompt so the user isn't asked about calls that would fail anyway (e.g. Edit without a prior Read).
@@ -45,7 +47,11 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 - `server/store.ts`: sessions as `<HARNESS_DATA_DIR>/sessions/<uuid>.jsonl` (`meta` / `message` / `result` / `compact` records).
   `message` records are exactly what was sent to Ollama, so resuming replays them as-is; a `compact` record holds the whole
   conversation after compaction and replaces everything before it. `toEvents` turns records into GUI events (full history).
-- `server/systemPrompt.ts`: environment, working rules, plan-mode rules, and the working folder's `AGENTS.md` / `CLAUDE.md`.
+- `server/web.ts`: WebSearch / WebFetch, offered only when the session's web setting is on (default off). Searches go to
+  a local SearXNG (`npm run searxng` → `scripts/searxng.ts`, Docker via OrbStack, 127.0.0.1:38730, JSON format enabled);
+  WebFetch never reaches this machine or the LAN (`checkUrl` plus a `lookup` that refuses private addresses at connect
+  time, re-checked on every redirect). Queries and URLs carrying a secret (`findSecret`) are refused before sending.
+- `server/systemPrompt.ts`: environment, working rules, plan-mode rules, web rules, and the working folder's `AGENTS.md` / `CLAUDE.md`.
 - `shared/protocol.ts`: browser⇄server messages. Session-scoped messages carry `key`, a client-generated tab ID.
   Agent progress is `{type:'event', key, ev: AgentEvent}`; a resumed session's past turns come as `history` with the same event shapes.
 - `web/src/state.ts`: the reducer. Shared parts (Ollama status, models, history) and `tabs: Tab[]`.
@@ -59,6 +65,7 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 - `npm run build` then `npm start`: serves `dist/` at http://localhost:38720
 - Ports live in `shared/ports.ts` (different from custom-harnes so both can run at once; avoid 49152+)
 - `npm run typecheck`: checks both server and web (TypeScript 7)
+- `npm run searxng [-- stop|status]`: the local SearXNG container for WebSearch (needs Docker, e.g. OrbStack)
 - `npm test`: node:test via tsx (`server/**/*.test.ts`). `agent.test.ts` drives the loop with a scripted fake model.
 
 ## Rules
@@ -66,6 +73,8 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 - Keep the server bound to `127.0.0.1` and keep the WebSocket Origin allowlist (`ALLOWED_ORIGINS` in `server/index.ts`).
   Any web page can reach localhost, so without the allowlist a malicious site could run commands through the agent.
 - Anything the model asks to run goes through `gate()`; don't add a tool that bypasses it.
+- Web access stays off by default, and WebFetch must never reach this machine or the LAN (keep `checkUrl` / `safeLookup` in
+  `server/web.ts`): a prompt-injected page could otherwise make the agent call Ollama, this harness or the router.
 - When you are unsure of an Ollama response shape, check it against the real server (`curl http://127.0.0.1:11434/api/chat ...`). Don't guess.
 - Local models have small contexts: cap tool output (`MAX_OUTPUT_CHARS`) and keep tool descriptions short and direct.
 - UI text is Japanese.

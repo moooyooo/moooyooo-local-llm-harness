@@ -9,8 +9,9 @@ import { DEV_SERVER_PORT, DEV_WEB_PORT, PROD_PORT } from '../shared/ports.js';
 import { MAX_IMAGE_BASE64, MAX_IMAGES } from '../shared/protocol.js';
 import type { ClientMessage, PermissionMode, ServerMessage, SessionSettings, ThinkSetting } from '../shared/protocol.js';
 import { AgentSession, type AgentConfig } from './agent.js';
-import { chat, describeError, getStatus, listLoaded, listModels, modelCapabilities, OLLAMA_URL } from './ollama.js';
+import { chat, describeError, getStatus, listLoaded, listModels, modelCapabilities, OLLAMA_URL, unloadModel } from './ollama.js';
 import { DATA_DIR, listFolders, SessionStore, toEvents, toMessages } from './store.js';
+import { SEARXNG_URL, searxngReachable } from './web.js';
 
 const HOST = '127.0.0.1';
 const DEV = process.argv.includes('--dev');
@@ -45,6 +46,7 @@ async function resolveSettings(o: SessionSettings) {
     think: THINK_SETTINGS.has(o.think ?? '') ? (o.think ?? '') : '',
     numCtx: o.numCtx && o.numCtx > 0 ? Math.floor(o.numCtx) : undefined,
     permissionMode: PERMISSION_MODES.has(o.permissionMode!) ? o.permissionMode! : 'default',
+    web: o.web === true,
     capabilities,
   } satisfies Omit<AgentConfig, 'sessionId' | 'cwd'>;
 }
@@ -94,13 +96,14 @@ wss.on('connection', (ws: WebSocket) => {
   };
 
   const sendModels = async () => {
-    const ollama = await getStatus();
-    if (ollama.error) return send({ type: 'models', ollama, models: [], loaded: [] });
+    const [ollama, searxOk] = await Promise.all([getStatus(), searxngReachable()]);
+    const searxng = { url: SEARXNG_URL, ok: searxOk };
+    if (ollama.error) return send({ type: 'models', ollama, models: [], loaded: [], searxng });
     try {
       const [models, loaded] = await Promise.all([listModels(), listLoaded()]);
-      send({ type: 'models', ollama, models, loaded });
+      send({ type: 'models', ollama, models, loaded, searxng });
     } catch (err) {
-      send({ type: 'models', ollama: { ...ollama, error: describeError(err) }, models: [], loaded: [] });
+      send({ type: 'models', ollama: { ...ollama, error: describeError(err) }, models: [], loaded: [], searxng });
     }
   };
 
@@ -140,6 +143,7 @@ wss.on('connection', (ws: WebSocket) => {
         store,
         autoApprove: () => autoApprove,
         contextLength: async (model) => (await listLoaded()).find((m) => m.name === model)?.contextLength,
+        unload: (model, signal) => unloadModel(model, signal),
       },
     );
     s.on('event', (ev) => send({ type: 'event', key, ev }));

@@ -10,5 +10,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["server", "shared"]
+  "include": ["server", "shared", "scripts"]
 }

@@ -7,3 +7,5 @@ export const PROD_PORT = 38720;
 export const DEV_SERVER_PORT = 38721;
 /** `npm run dev`: Vite dev server (proxies /ws to DEV_SERVER_PORT). */
 export const DEV_WEB_PORT = 38722;
+/** `npm run searxng`: the local SearXNG container behind WebSearch, published on 127.0.0.1 only. */
+export const SEARXNG_PORT = 38730;

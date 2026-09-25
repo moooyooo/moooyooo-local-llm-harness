@@ -52,13 +52,21 @@ function session(
     store?: SessionStore;
     caps?: string[];
     numCtx?: number;
-    /** Context window of the "loaded" model. */
-    loadedCtx?: number;
+    /** Context window of the "loaded" model: a number, or a function for one that changes. */
+    loadedCtx?: number | (() => number | undefined);
+    unload?: AgentDeps['unload'];
     history?: OllamaMessage[];
   },
 ) {
   const events: AgentEvent[] = [];
-  const deps: AgentDeps = { chat, store: opts.store, autoApprove: () => !!opts.auto, contextLength: async () => opts.loadedCtx ?? 4096 };
+  const loaded = opts.loadedCtx ?? 4096;
+  const deps: AgentDeps = {
+    chat,
+    store: opts.store,
+    autoApprove: () => !!opts.auto,
+    contextLength: async () => (typeof loaded === 'function' ? loaded() : loaded),
+    unload: opts.unload,
+  };
   const s = new AgentSession(
     {
       sessionId: SESSION,
@@ -437,6 +445,63 @@ test('settings changed between turns apply from the next message', async () => {
   const notices = toEvents(records).events.filter((e) => e.type === 'notice');
   assert.equal(notices.length, 1);
   assert.match(notices[0].type === 'notice' ? notices[0].text : '', /モデル test → other/);
+});
+
+test('a model loaded with a smaller window than num_ctx is freed so it loads again with ours, once', async () => {
+  let loaded: number | undefined = 16384;
+  const unloads: string[] = [];
+  const { chat: inner } = scripted(reply('one'), reply('two'));
+  // Ollama loads it again, but (say, short of memory) with less than asked for.
+  const chat: ChatFn = async (req, signal, cb) => ((loaded = 32768), inner(req, signal, cb));
+  const unload = async (model: string) => (unloads.push(model), (loaded = undefined), true);
+  const { s, events } = session(chat, { cwd: tmp(), numCtx: 65536, loadedCtx: () => loaded, unload });
+
+  await s.sendUser('first');
+  assert.deepEqual(unloads, ['test']);
+  assert.match(last(events, 'notice')!.text, /test を 16K で読み込んでいたため、64K で読み込み直します/);
+  assert.equal(last(events, 'result')!.stats?.contextMax, 32768, 'the meter shows the window actually in use');
+
+  await s.sendUser('second');
+  assert.equal(unloads.length, 1, 'not retried for the same settings');
+});
+
+test('if the model stays loaded (another request is running), the turn goes on and the next one tries again', async () => {
+  const unloads: string[] = [];
+  const { chat } = scripted(reply('one'), reply('two'));
+  const unload = async (model: string) => (unloads.push(model), false);
+  const { s, events } = session(chat, { cwd: tmp(), numCtx: 65536, loadedCtx: 16384, unload });
+  await s.sendUser('first');
+  assert.match(last(events, 'notice')!.text, /今回は 16K のまま続けます/);
+  assert.equal(last(events, 'result')!.subtype, 'success');
+  await s.sendUser('second');
+  assert.equal(unloads.length, 2);
+});
+
+test('web tools are offered, allowed and described only when web access is on', async () => {
+  const { chat, requests } = scripted(reply('', [call('call_1', 'WebSearch', { query: 'ollama' })]), reply('off'), reply('on'));
+  const { s, events } = session(chat, { cwd: tmp(), mode: 'bypassPermissions' });
+  await s.sendUser('search');
+  const names = (i: number) => requests[i].tools?.map((t) => t.function.name) ?? [];
+  assert.ok(!names(0).includes('WebSearch') && !names(0).includes('WebFetch'));
+  assert.match(last(events, 'toolResult')!.output, /Web access is turned off/, 'a call anyway is refused, even in bypass mode');
+  assert.doesNotMatch(requests[0].messages[0].content, /# Web access/);
+
+  assert.equal(s.configure({ model: 'test', think: '', permissionMode: 'bypassPermissions', web: true, capabilities: ['completion', 'tools'] }), true);
+  assert.match(last(events, 'notice')!.text, /Web 検索 オフ → オン/);
+  assert.equal(last(events, 'init')!.web, true);
+  await s.sendUser('again');
+  assert.ok(names(2).includes('WebSearch') && names(2).includes('WebFetch'));
+  assert.match(requests[2].messages[0].content, /# Web access[\s\S]*untrusted/);
+});
+
+test('a web query that carries a secret is refused before anything is sent or asked', async () => {
+  const key = 'AKIA' + 'ABCDEFGHIJKLMNOP';
+  const { chat } = scripted(reply('', [call('call_1', 'WebSearch', { query: `why is ${key} rejected` })]), reply('ok'));
+  const { s, events } = session(chat, { cwd: tmp() });
+  s.configure({ model: 'test', think: '', permissionMode: 'default', web: true, capabilities: ['completion', 'tools'] });
+  await s.sendUser('search');
+  assert.ok(!events.some((e) => e.type === 'permission'), 'the user is not even asked');
+  assert.match(last(events, 'toolResult')!.output, /contains a secret \(AWS アクセスキー\)/);
 });
 
 test('without the tools capability no tools are sent', async () => {

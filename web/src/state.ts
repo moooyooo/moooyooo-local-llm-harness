@@ -60,6 +60,8 @@ export interface SessionInfo {
   permissionMode: PermissionMode;
   think: ThinkSetting;
   numCtx?: number;
+  /** WebSearch / WebFetch are offered. */
+  web: boolean;
   /** false when the model has no tool support (chat only). */
   tools: boolean;
 }
@@ -99,6 +101,8 @@ export interface State {
   models: ModelInfo[];
   /** Models currently in memory. */
   loaded: LoadedModel[];
+  /** The local SearXNG behind WebSearch; undefined = not checked yet. */
+  searxng?: { url: string; ok: boolean };
   /** Saved sessions, newest first. */
   sessions: SessionSummary[];
   /** Working folders that have sessions, newest first. */
@@ -225,7 +229,7 @@ function onServer(state: State, msg: ServerMessage, at: number): State {
     case 'hello':
       return { ...state, defaultCwd: msg.defaultCwd, dataDir: msg.dataDir };
     case 'models':
-      return { ...state, ollama: msg.ollama, models: msg.models, loaded: msg.loaded };
+      return { ...state, ollama: msg.ollama, models: msg.models, loaded: msg.loaded, searxng: msg.searxng };
     case 'sessions':
       return { ...state, sessions: msg.sessions, folders: msg.folders };
     case 'status':

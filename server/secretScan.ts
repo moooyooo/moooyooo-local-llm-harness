@@ -75,6 +75,14 @@ const CONTENT_RULES: ContentRule[] = [
 const ASSIGNMENT = /\b(password|passwd|pwd|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key)\b["']?\s*[:=]\s*["']([^"'\s]{8,})["']/i;
 const PLACEHOLDER = /^(x+|\*+|\.+|<.*>|\$\{.*\}|\{\{.*\}\}|%.*%|changeme|change_me|your[_-]?|example|dummy|sample|placeholder|test|password|secret|null|none|undefined|todo)/i;
 
+/** The kind of secret `text` seems to contain (e.g. a web search query about to leave the machine), or undefined. */
+export function findSecret(text: string): string | undefined {
+  for (const r of CONTENT_RULES) if (r.re.test(text)) return r.rule;
+  const a = ASSIGNMENT.exec(text);
+  if (a && !PLACEHOLDER.test(a[2])) return `${a[1]} の値`;
+  return undefined;
+}
+
 // --- Entry point -------------------------------------------------------------------------------
 
 export async function scanBeforeGit(ops: GitOp[], cwd: string): Promise<SecurityScan> {

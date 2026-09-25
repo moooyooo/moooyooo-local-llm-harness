@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import type { SecurityScan } from '../shared/protocol.js';
-import { scanBeforeGit } from './secretScan.js';
+import { findSecret, scanBeforeGit } from './secretScan.js';
 
 // Fake secrets are assembled at runtime so this file itself never matches a secret pattern.
 const FAKE_AWS = 'AKIA' + 'ABCDEFGHIJKLMNOP';
@@ -115,4 +115,12 @@ test('push: secrets anywhere in unpushed history are found, even if later delete
   assert.equal(s.error, undefined);
   assert.ok(has(s, 'cfg.ts', /AWS/), 'history still contains the key');
   assert.match(s.scope, /push/);
+});
+
+test('findSecret spots a secret in a single string, such as a web query or URL', () => {
+  assert.equal(findSecret(`aws key ${FAKE_AWS} leaked`), 'AWS アクセスキー');
+  assert.equal(findSecret(`https://example.com/?token=${FAKE_GH}`), 'GitHub トークン');
+  assert.match(findSecret('api_key = "' + 'q7Zp2LmX9vR4' + '"') ?? '', /api_key/);
+  assert.equal(findSecret('api_key = "your-api-key-here"'), undefined, 'placeholders are fine');
+  assert.equal(findSecret('ollama num_ctx 64k mlx reload'), undefined);
 });

@@ -43,6 +43,8 @@ interface Settings {
   permissionMode?: PermissionMode;
   /** Browser notifications for finished turns and permission prompts. */
   notify?: boolean;
+  /** Offer WebSearch / WebFetch through the local SearXNG. */
+  web?: boolean;
   /** Auto-approve permission prompts that can't affect the host (decided by server/autoApprove.ts). */
   autoApprove?: boolean;
   /** Working folder for new tabs. */
@@ -84,6 +86,7 @@ export function App() {
     think: live ? live.think : (settings.think ?? ''),
     numCtx: live ? (live.numCtx ?? 0) : (settings.numCtx ?? 0),
     permissionMode: live?.permissionMode ?? settings.permissionMode ?? 'default',
+    web: live ? live.web : !!settings.web,
   };
   const shownModel = state.models.find((m) => m.name === shown.model);
   const canThink = !!shownModel?.capabilities.includes('thinking');
@@ -190,6 +193,7 @@ export function App() {
         think: settings.think ?? '',
         numCtx: settings.numCtx || undefined,
         permissionMode: settings.permissionMode ?? 'default',
+        web: !!settings.web,
         resume,
       },
     });
@@ -240,10 +244,10 @@ export function App() {
   };
 
   /** Settings changed in the sidebar: the default for new sessions, and for a running tab also its own. */
-  const changeSettings = (patch: Partial<Pick<Settings, 'model' | 'think' | 'numCtx' | 'permissionMode'>>) => {
+  const changeSettings = (patch: Partial<Pick<Settings, 'model' | 'think' | 'numCtx' | 'permissionMode' | 'web'>>) => {
     setSettings((s) => ({ ...s, ...patch }));
     if (!live) return;
-    const next = { model: live.model, think: live.think, numCtx: live.numCtx, permissionMode: live.permissionMode, ...patch };
+    const next = { model: live.model, think: live.think, numCtx: live.numCtx, permissionMode: live.permissionMode, web: live.web, ...patch };
     send({ type: 'configure', key: tab.key, options: { ...next, numCtx: next.numCtx || undefined } });
   };
 
@@ -303,7 +307,7 @@ export function App() {
               {THINK_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </label>
-          <label title="コンテキスト長（num_ctx）。大きいほど長い作業を扱えますが、メモリを使い、変更するとモデルが再読み込みされます">
+          <label title="コンテキスト長（num_ctx）。大きいほど長い作業を扱えますが、メモリを多く使います。モデルがこれより小さい窓で読み込まれていたら、次のメッセージの前に読み込み直します">
             コンテキスト長
             <select value={shown.numCtx} disabled={settingsLocked} onChange={(e) => changeSettings({ numCtx: Number(e.target.value) })}>
               {NUM_CTX_OPTIONS.map((n) => (
@@ -327,6 +331,21 @@ export function App() {
             ))}
           </select>
         </label>
+        <label
+          className="check"
+          title="検索（ローカルの SearXNG 経由）と Web ページの取得をモデルに許します。検索語や URL は外部に送られます（秘密情報らしいものは送りません）"
+        >
+          <input
+            type="checkbox"
+            checked={shown.web}
+            disabled={settingsLocked}
+            onChange={(e) => changeSettings({ web: e.target.checked })}
+          />
+          Web 検索（SearXNG）
+        </label>
+        {shown.web && state.searxng && !state.searxng.ok && (
+          <div className="hint">SearXNG が起動していません。ターミナルで npm run searxng を実行してください（{state.searxng.url}）</div>
+        )}
         <label>
           再開するセッションID（任意）
           <input value={resumeInput} onChange={(e) => setResumeInput(e.target.value)} />

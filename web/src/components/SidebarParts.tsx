@@ -21,6 +21,7 @@ export function SessionPanel({ tab, onCompact }: { tab: Tab; onCompact: () => vo
           <div><span>Model</span><code title={s.model}>{s.model}</code></div>
           <div><span>Mode</span><code>{s.permissionMode}</code></div>
           <div><span>思考 / num_ctx</span><code>{THINK_LABEL[s.think] ?? s.think} / {s.numCtx ? formatTokens(s.numCtx) : '既定'}</code></div>
+          <div><span>Web 検索</span><code>{s.web ? 'オン' : 'オフ'}</code></div>
           {!s.tools && <div className="hint">ツール非対応のモデル（会話のみ）</div>}
         </>
       ) : (

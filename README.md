@@ -12,6 +12,17 @@ Claude Code CLI の代わりに、サーバー内の自前のエージェント�
 - [Ollama](https://ollama.com) が起動していること（既定: `http://127.0.0.1:11434`）
 - ツール呼び出しに対応したモデル（例: `qwen3-coder:30b`, `qwen3.6:35b-a3b`, `gemma4` など）
 - あると速いもの: [ripgrep](https://github.com/BurntSushi/ripgrep)（`rg`。なければ Grep は JavaScript 実装で動きます）
+- Web 検索を使う場合: Docker（[OrbStack](https://orbstack.dev) など）。検索はローカルで動かす [SearXNG](https://github.com/searxng/searxng) を使います
+
+### Web 検索の準備（使う場合だけ）
+
+```sh
+brew install --cask orbstack   # Docker 環境（初回は OrbStack を起動して初期設定する）
+npm run searxng                # SearXNG を起動（初回は設定ファイルとコンテナを作る。127.0.0.1:38730 だけで待ち受け）
+npm run searxng -- stop        # 停止（status で状態確認）
+```
+
+左パネルの「Web 検索（SearXNG）」を ON にすると、そのタブのモデルが WebSearch / WebFetch を使えるようになります（既定は OFF）。
 
 ## 使い方
 
@@ -75,6 +86,7 @@ custom-harnes から引き継いだもの:
 | Read / Glob / Grep / LS | 読み取り・検索 | 作業フォルダ内は確認なし（外や認証情報は確認） |
 | Write / Edit | ファイルの作成・上書き・部分置換 | 確認あり（`acceptEdits` ではフォルダ内は確認なし） |
 | Bash（Windows では PowerShell） | コマンド実行（既定 2 分でタイムアウト） | 確認あり |
+| WebSearch / WebFetch（Web 検索が ON のときだけ） | SearXNG での検索・Web ページの取得（このマシンと LAN には届かない） | 確認あり（自動承認の対象） |
 
 ## 環境変数
 
@@ -83,12 +95,14 @@ custom-harnes から引き継いだもの:
 | `PORT` | 本番 `38720` / 開発 `38721` | サーバーのポート（既定値は `shared/ports.ts`） |
 | `HARNESS_CWD` | サーバー起動時のフォルダ | 作業フォルダの既定値 |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama の URL |
-| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | セッション履歴の保存先（`sessions/<id>.jsonl`） |
+| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | セッション履歴の保存先（`sessions/<id>.jsonl`）と SearXNG の設定（`searxng/`） |
+| `SEARXNG_URL` | `http://127.0.0.1:38730` | WebSearch が使う SearXNG の URL |
 
 ## ヒント
 
 - モデルの初回読み込みには数秒〜数十秒かかります。読み込み済みのモデルは左下の「メモリ上のモデル」に表示されます
-- コンテキスト長を変えるとモデルが読み込み直されます。長い作業では 32K 以上をおすすめします
+- 長い作業では 32K 以上のコンテキスト長をおすすめします。モデルが指定より小さい窓で読み込まれていたら、ハーネスが解放して読み込み直します
+  （MLX 系のモデルは、Ollama が自分では読み込み直さないため）。読み込み直しには数十秒かかります
 - 思考をオフにすると速くなりますが、難しい作業の質は下がります
 - MoE モデル（`qwen3-coder:30b`、`qwen3.6:35b-a3b` など）は速く、対話的な作業に向いています
 

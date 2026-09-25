@@ -58,7 +58,9 @@ test('file tools', () => {
 });
 
 test('other tools', () => {
+  // Web tools can't touch the host: WebFetch never reaches this machine or the LAN, and secrets are refused before sending.
   assert.ok(isAuto('WebFetch', { url: 'https://example.com' }));
+  assert.ok(isAuto('WebSearch', { query: 'ollama num_ctx' }));
   assert.ok(isAuto('Agent', { prompt: 'x' }));
   assert.ok(!isAuto('ExitPlanMode', {}));
   assert.ok(!isAuto('mcp__gmail__send', {}));

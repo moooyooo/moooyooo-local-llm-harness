@@ -10,11 +10,13 @@
     "dev:web": "vite",
     "build": "vite build",
     "start": "tsx server/index.ts",
+    "searxng": "tsx scripts/searxng.ts",
     "test": "tsx --test \"server/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit"
   },
   "dependencies": {
     "express": "^5.2.1",
+    "html-to-text": "^10.0.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
@@ -23,6 +25,7 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/html-to-text": "^9.0.4",
     "@types/node": "^26.6.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

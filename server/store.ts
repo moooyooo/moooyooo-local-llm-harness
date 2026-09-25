@@ -22,6 +22,7 @@ export interface RecordedSettings {
   think: ThinkSetting;
   numCtx: number;
   permissionMode: PermissionMode;
+  web: boolean;
 }
 
 export type SessionRecord =
@@ -160,6 +161,7 @@ export function describeSettingsChange(prev: Partial<RecordedSettings>, next: Pa
   if (prev.think !== next.think) changes.push(`思考 ${THINK_LABEL[prev.think ?? '']} → ${THINK_LABEL[next.think ?? '']}`);
   if ((prev.numCtx || 0) !== (next.numCtx || 0)) changes.push(`コンテキスト長 ${ctx(prev.numCtx)} → ${ctx(next.numCtx)}`);
   if (prev.permissionMode !== next.permissionMode) changes.push(`権限モード ${prev.permissionMode} → ${next.permissionMode}`);
+  if (!!prev.web !== !!next.web) changes.push(`Web 検索 ${prev.web ? 'オン' : 'オフ'} → ${next.web ? 'オン' : 'オフ'}`);
   return changes.length ? `設定を変更しました: ${changes.join('、')}` : undefined;
 }
 
@@ -169,7 +171,7 @@ export function toEvents(records: SessionRecord[]): { events: AgentEvent[]; omit
   let settings: Partial<RecordedSettings> | undefined;
   for (const r of records) {
     if (r.type === 'meta') {
-      const next: Partial<RecordedSettings> = { model: r.model, think: r.think, numCtx: r.numCtx, permissionMode: r.permissionMode };
+      const next: Partial<RecordedSettings> = { model: r.model, think: r.think, numCtx: r.numCtx, permissionMode: r.permissionMode, web: r.web };
       if (settings) {
         // Older records hold only the model, so compare the rest only when both records have it.
         const full = !!(settings.permissionMode && next.permissionMode);

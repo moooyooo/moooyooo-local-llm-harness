@@ -8,7 +8,8 @@ import type { LoadedModel, ModelInfo, OllamaStatus } from '../shared/protocol.js
  * chunk, and nothing at all is streamed while one is generated (minutes for a large Write).
  * `think: true` on a model without the `thinking` capability is an error. Hitting `num_predict` ends with
  * done_reason "length" and drops a tool call cut off midway; overflowing `num_ctx` does not stop generation
- * (Ollama silently shifts the context and ends with "stop").
+ * (Ollama silently shifts the context and ends with "stop"). A loaded MLX (safetensors) model is reused whatever
+ * `num_ctx` a request asks for (GGUF models reload), so a larger window needs `unloadModel` first.
  */
 
 export const OLLAMA_URL = normalizeHost(process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434');
@@ -202,6 +203,20 @@ export async function listLoaded(): Promise<LoadedModel[]> {
     contextLength: m.context_length,
     expiresAt: m.expires_at,
   }));
+}
+
+/**
+ * Frees a model so its next request loads it again with that request's options. A request already running (e.g. from
+ * another device) finishes first, so this waits until the model is gone. Returns false if it's still loaded at `waitMs`.
+ */
+export async function unloadModel(model: string, signal: AbortSignal, waitMs = 120_000): Promise<boolean> {
+  await request('/api/generate', { method: 'POST', body: JSON.stringify({ model, keep_alive: 0 }) });
+  const until = Date.now() + waitMs;
+  while (!signal.aborted && Date.now() < until) {
+    if (!(await listLoaded()).some((m) => m.name === model)) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
 }
 
 export async function modelCapabilities(model: string): Promise<string[]> {
