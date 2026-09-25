@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import type { SecurityScan } from '../shared/protocol.js';
+import { textOf } from '../shared/i18n/index.js';
 import { findSecret, scanBeforeGit } from './secretScan.js';
 
 // Fake secrets are assembled at runtime so this file itself never matches a secret pattern.
@@ -32,7 +33,8 @@ function git(root: string, ...args: string[]) {
   execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd: root, stdio: 'pipe' });
 }
 
-const has = (s: SecurityScan, p: string, rule?: RegExp) => s.findings.some((f) => f.path === p && (!rule || rule.test(f.rule)));
+const has = (s: SecurityScan, p: string, rule?: RegExp) => s.findings.some((f) => f.path === p && (!rule || rule.test(textOf('ja', f.rule))));
+const secretIn = (text: string) => { const m = findSecret(text); return m && textOf('ja', m); };
 
 test('before git init: secrets, sensitive files and generated folders', async () => {
   const root = tmp({
@@ -57,13 +59,13 @@ test('before git init: secrets, sensitive files and generated folders', async ()
   assert.ok(!has(s, '.env', /OpenAI/), 'an Anthropic key is not also reported as OpenAI');
   assert.ok(has(s, 'keys/server.pem', /秘密鍵/));
   assert.ok(has(s, 'settings.json', /api_key/));
-  assert.ok(!s.findings.some((f) => f.detail?.includes('changeme')), 'placeholders are ignored');
+  assert.ok(!s.findings.some((f) => f.detail && textOf('ja', f.detail).includes('changeme')), 'placeholders are ignored');
   assert.ok(has(s, 'node_modules/', /gitignore/));
   assert.ok(has(s, 'dotnet/bin/', /gitignore/), '.NET build output');
   assert.ok(!has(s, 'bin/'), 'bin/ outside a .NET project is source');
   assert.ok(has(s, 'debug.log'));
   assert.ok(!has(s, 'src/app.ts'));
-  assert.ok(s.findings.every((f) => !f.detail?.includes(FAKE_AWS)), 'secrets are redacted');
+  assert.ok(s.findings.every((f) => !f.detail || !textOf('ja', f.detail).includes(FAKE_AWS)), 'secrets are redacted');
   assert.equal(s.findings[0].severity, 'high', 'high severity first');
 });
 
@@ -114,13 +116,13 @@ test('push: secrets anywhere in unpushed history are found, even if later delete
   const s = await scanBeforeGit(['push'], root);
   assert.equal(s.error, undefined);
   assert.ok(has(s, 'cfg.ts', /AWS/), 'history still contains the key');
-  assert.match(s.scope, /push/);
+  assert.match(textOf('ja', s.scope), /push/);
 });
 
 test('findSecret spots a secret in a single string, such as a web query or URL', () => {
-  assert.equal(findSecret(`aws key ${FAKE_AWS} leaked`), 'AWS アクセスキー');
-  assert.equal(findSecret(`https://example.com/?token=${FAKE_GH}`), 'GitHub トークン');
-  assert.match(findSecret('api_key = "' + 'q7Zp2LmX9vR4' + '"') ?? '', /api_key/);
+  assert.equal(secretIn(`aws key ${FAKE_AWS} leaked`), 'AWS アクセスキー');
+  assert.equal(secretIn(`https://example.com/?token=${FAKE_GH}`), 'GitHub トークン');
+  assert.match(secretIn('api_key = "' + 'q7Zp2LmX9vR4' + '"') ?? '', /api_key/);
   assert.equal(findSecret('api_key = "your-api-key-here"'), undefined, 'placeholders are fine');
   assert.equal(findSecret('ollama num_ctx 64k mlx reload'), undefined);
 });

@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import { msg, TextError, type Text } from '../shared/i18n/index.js';
 import type { LoadedModel, ModelInfo, OllamaStatus } from '../shared/protocol.js';
 
 /**
@@ -225,12 +226,13 @@ export async function modelCapabilities(model: string): Promise<string[]> {
   return show.capabilities ?? [];
 }
 
-export function describeError(err: unknown): string {
+export function describeError(err: unknown): Text {
+  if (err instanceof TextError) return err.text;
   const e = err as { message?: string; code?: string; cause?: { code?: string } };
   // node:http puts the code on the error itself, fetch on its cause.
   const code = e?.code ?? e?.cause?.code;
-  if (code === 'ECONNREFUSED') return `Ollama に接続できません（${OLLAMA_URL}）。ollama serve を起動してください`;
-  if (code === 'ECONNRESET') return `Ollama との接続が切れました（${OLLAMA_URL}）。Ollama が終了・再起動した可能性があります`;
-  if ((err as Error)?.name === 'TimeoutError') return `Ollama が応答しません（${OLLAMA_URL}）`;
+  if (code === 'ECONNREFUSED') return msg('error.ollamaRefused', { url: OLLAMA_URL });
+  if (code === 'ECONNRESET') return msg('error.ollamaReset', { url: OLLAMA_URL });
+  if ((err as Error)?.name === 'TimeoutError') return msg('error.ollamaTimeout', { url: OLLAMA_URL });
   return e?.message ?? String(err);
 }

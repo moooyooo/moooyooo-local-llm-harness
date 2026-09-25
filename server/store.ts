@@ -2,6 +2,7 @@ import { appendFile, mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentEvent, FolderSummary, PermissionMode, SessionSummary, ThinkSetting, ToolCall } from '../shared/protocol.js';
+import { msg, type Msg, type Text } from '../shared/i18n/index.js';
 import type { OllamaMessage } from './ollama.js';
 
 /**
@@ -32,7 +33,7 @@ export type SessionRecord =
    */
   | ({ type: 'meta'; sessionId: string; cwd: string; timestamp: string } & Pick<RecordedSettings, 'model'> & Partial<RecordedSettings>)
   /** `notice`: the harness wrote this message itself; the GUI shows the notice instead of the message. */
-  | { type: 'message'; message: OllamaMessage; isError?: boolean; notice?: string; timestamp: string }
+  | { type: 'message'; message: OllamaMessage; isError?: boolean; notice?: Text; timestamp: string }
   | { type: 'result'; result: ResultEvent; timestamp: string }
   /**
    * The conversation was compacted: from here on it is `messages` (the summary and the messages kept as they were).
@@ -151,18 +152,19 @@ export function toMessages(records: SessionRecord[]): OllamaMessage[] {
   return messages;
 }
 
-const THINK_LABEL: Record<ThinkSetting, string> = { '': '既定', on: 'オン', off: 'オフ', low: 'low', medium: 'medium', high: 'high' };
+const THINK_LABEL: Record<ThinkSetting, Text> = { '': msg('common.default'), on: msg('common.on'), off: msg('common.off'), low: 'low', medium: 'medium', high: 'high' };
+const onOff = (on?: boolean) => msg(on ? 'common.on' : 'common.off');
 
 /** What changed between two sets of settings, for the transcript; undefined when nothing did. */
-export function describeSettingsChange(prev: Partial<RecordedSettings>, next: Partial<RecordedSettings>): string | undefined {
-  const ctx = (n?: number) => (n ? `${Math.round(n / 1024)}K` : '既定');
-  const changes: string[] = [];
-  if (prev.model !== next.model) changes.push(`モデル ${prev.model} → ${next.model}`);
-  if (prev.think !== next.think) changes.push(`思考 ${THINK_LABEL[prev.think ?? '']} → ${THINK_LABEL[next.think ?? '']}`);
-  if ((prev.numCtx || 0) !== (next.numCtx || 0)) changes.push(`コンテキスト長 ${ctx(prev.numCtx)} → ${ctx(next.numCtx)}`);
-  if (prev.permissionMode !== next.permissionMode) changes.push(`権限モード ${prev.permissionMode} → ${next.permissionMode}`);
-  if (!!prev.web !== !!next.web) changes.push(`Web 検索 ${prev.web ? 'オン' : 'オフ'} → ${next.web ? 'オン' : 'オフ'}`);
-  return changes.length ? `設定を変更しました: ${changes.join('、')}` : undefined;
+export function describeSettingsChange(prev: Partial<RecordedSettings>, next: Partial<RecordedSettings>): Msg | undefined {
+  const ctx = (n?: number): Text => (n ? `${Math.round(n / 1024)}K` : msg('common.default'));
+  const changes: Msg[] = [];
+  if (prev.model !== next.model) changes.push(msg('settings.model', { from: prev.model ?? '', to: next.model ?? '' }));
+  if (prev.think !== next.think) changes.push(msg('settings.think', { from: THINK_LABEL[prev.think ?? ''], to: THINK_LABEL[next.think ?? ''] }));
+  if ((prev.numCtx || 0) !== (next.numCtx || 0)) changes.push(msg('settings.numCtx', { from: ctx(prev.numCtx), to: ctx(next.numCtx) }));
+  if (prev.permissionMode !== next.permissionMode) changes.push(msg('settings.mode', { from: prev.permissionMode ?? '', to: next.permissionMode ?? '' }));
+  if (!!prev.web !== !!next.web) changes.push(msg('settings.web', { from: onOff(prev.web), to: onOff(next.web) }));
+  return changes.length ? msg('settings.changed', { changes }) : undefined;
 }
 
 /** Past turns as GUI events, newest `HISTORY_LIMIT`. */

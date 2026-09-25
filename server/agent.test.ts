@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import type { AgentEvent, PermissionMode } from '../shared/protocol.js';
 import { AgentSession, MAX_OUTPUT_TOKENS, thinkParam, type AgentDeps } from './agent.js';
+import { textOf, type Text } from '../shared/i18n/index.js';
 import { SUMMARY_HEADER, SUMMARY_PROMPT } from './compact.js';
 import type { ChatFn, ChatRequest, ChatResult, OllamaMessage, OllamaToolCall } from './ollama.js';
 import { SessionStore, toEvents, toMessages } from './store.js';
@@ -91,6 +92,9 @@ function session(
 
 const last = <T extends AgentEvent['type']>(events: AgentEvent[], type: T) =>
   events.filter((e): e is Extract<AgentEvent, { type: T }> => e.type === type).at(-1);
+
+/** Server text as the Japanese GUI shows it. */
+const ja = (t: Text) => textOf('ja', t);
 
 test('plain answer: streams, commits the message and reports stats', async () => {
   const { chat, requests } = scripted(reply('こんにちは'));
@@ -241,7 +245,7 @@ test('model errors end the turn with an error result', async () => {
   await s.sendUser('hi');
   const r = last(events, 'result')!;
   assert.equal(r.subtype, 'error');
-  assert.match(r.message ?? '', /not found/);
+  assert.match(ja(r.message ?? ''), /not found/);
 });
 
 test('a failed model call keeps what was streamed before the failure', async () => {
@@ -274,7 +278,7 @@ test('a reply cut off at the output limit is retried once with a request for sma
   assert.equal(events.filter((e) => e.type === 'notice').length, 1);
   const result = last(events, 'result')!;
   assert.equal(result.subtype, 'success');
-  assert.match(result.message ?? '', /もう一度途中で切れた/);
+  assert.match(ja(result.message ?? ''), /もう一度途中で切れた/);
 
   // History shows the notice instead of the note, and the note doesn't count as a prompt.
   const records = (await store.load(SESSION))!;
@@ -390,7 +394,7 @@ test('compacting on request with nothing to summarize reports it', async () => {
   assert.equal(requests.length, 0);
   const ev = last(events, 'compact')!;
   assert.equal(ev.phase, 'failed');
-  assert.match(ev.message ?? '', /まだありません/);
+  assert.match(ja(ev.message ?? ''), /まだありません/);
 });
 
 test('images go to a vision model, and are replaced by a note for a model without vision', async () => {
@@ -426,7 +430,7 @@ test('settings changed between turns apply from the next message', async () => {
   await turn;
   assert.equal(s.configure(next), true);
   assert.equal(last(events, 'init')!.model, 'other');
-  assert.match(last(events, 'notice')!.text, /モデル test → other、思考 既定 → オフ、コンテキスト長 既定 → 16K、権限モード default → plan/);
+  assert.match(ja(last(events, 'notice')!.text), /モデル test → other、思考 既定 → オフ、コンテキスト長 既定 → 16K、権限モード default → plan/);
   assert.equal(s.configure(next), true, 'no change');
   assert.equal(events.filter((e) => e.type === 'notice').length, 1);
 
@@ -444,7 +448,7 @@ test('settings changed between turns apply from the next message', async () => {
   assert.equal((await store.list())[0].model, 'other');
   const notices = toEvents(records).events.filter((e) => e.type === 'notice');
   assert.equal(notices.length, 1);
-  assert.match(notices[0].type === 'notice' ? notices[0].text : '', /モデル test → other/);
+  assert.match(notices[0].type === 'notice' ? ja(notices[0].text) : '', /モデル test → other/);
 });
 
 test('a model loaded with a smaller window than num_ctx is freed so it loads again with ours, once', async () => {
@@ -458,7 +462,7 @@ test('a model loaded with a smaller window than num_ctx is freed so it loads aga
 
   await s.sendUser('first');
   assert.deepEqual(unloads, ['test']);
-  assert.match(last(events, 'notice')!.text, /test を 16K で読み込んでいたため、64K で読み込み直します/);
+  assert.match(ja(last(events, 'notice')!.text), /test を 16K で読み込んでいたため、64K で読み込み直します/);
   assert.equal(last(events, 'result')!.stats?.contextMax, 32768, 'the meter shows the window actually in use');
 
   await s.sendUser('second');
@@ -471,7 +475,7 @@ test('if the model stays loaded (another request is running), the turn goes on a
   const unload = async (model: string) => (unloads.push(model), false);
   const { s, events } = session(chat, { cwd: tmp(), numCtx: 65536, loadedCtx: 16384, unload });
   await s.sendUser('first');
-  assert.match(last(events, 'notice')!.text, /今回は 16K のまま続けます/);
+  assert.match(ja(last(events, 'notice')!.text), /今回は 16K のまま続けます/);
   assert.equal(last(events, 'result')!.subtype, 'success');
   await s.sendUser('second');
   assert.equal(unloads.length, 2);
@@ -487,7 +491,7 @@ test('web tools are offered, allowed and described only when web access is on', 
   assert.doesNotMatch(requests[0].messages[0].content, /# Web access/);
 
   assert.equal(s.configure({ model: 'test', think: '', permissionMode: 'bypassPermissions', web: true, capabilities: ['completion', 'tools'] }), true);
-  assert.match(last(events, 'notice')!.text, /Web 検索 オフ → オン/);
+  assert.match(ja(last(events, 'notice')!.text), /Web 検索 オフ → オン/);
   assert.equal(last(events, 'init')!.web, true);
   await s.sendUser('again');
   assert.ok(names(2).includes('WebSearch') && names(2).includes('WebFetch'));

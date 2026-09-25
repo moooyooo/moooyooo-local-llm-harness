@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { textOf, type Text } from '../shared/i18n/index.js';
 import path from 'node:path';
 import { test } from 'node:test';
 import { classifyCommand, classifyPermission, gitOperations, insideCwd } from './autoApprove.js';
 import type { ShellKind } from './shellParse.js';
+
+/** Server text as the Japanese GUI shows it. */
+const ja = (t: Text) => textOf('ja', t);
 
 const CWD = path.resolve('/work/proj');
 const inProj = (...p: string[]) => path.join(CWD, ...p);
@@ -68,9 +72,9 @@ test('other tools', () => {
 });
 
 test('reported case: multi-line commit messages are data, not commands', () => {
-  assert.ok(cmdAuto(REPORTED_PS_COMMIT, 'powershell'), classifyCommand(REPORTED_PS_COMMIT, CWD, 'powershell').reason);
+  assert.ok(cmdAuto(REPORTED_PS_COMMIT, 'powershell'), ja(classifyCommand(REPORTED_PS_COMMIT, CWD, 'powershell').reason));
   assert.ok(isAuto('PowerShell', { command: REPORTED_PS_COMMIT }));
-  assert.ok(cmdAuto(BASH_HEREDOC_COMMIT, 'bash'), classifyCommand(BASH_HEREDOC_COMMIT, CWD, 'bash').reason);
+  assert.ok(cmdAuto(BASH_HEREDOC_COMMIT, 'bash'), ja(classifyCommand(BASH_HEREDOC_COMMIT, CWD, 'bash').reason));
   assert.ok(cmdAuto('git commit -m "fix: a > b; c | d && e"'));
   assert.ok(cmdAuto("git commit -m 'use `code` and $(x) literally'"));
 });
@@ -186,6 +190,6 @@ test('gitOperations detects publishing commands, ignoring message text', () => {
 });
 
 test('reason is reported for manual decisions', () => {
-  assert.match(classifyCommand('git push', CWD, 'bash').reason, /git push/);
-  assert.match(classifyPermission('Write', { file_path: path.resolve('/x/y') }, CWD).reason, /作業フォルダ外/);
+  assert.match(ja(classifyCommand('git push', CWD, 'bash').reason), /git push/);
+  assert.match(ja(classifyPermission('Write', { file_path: path.resolve('/x/y') }, CWD).reason), /作業フォルダ外/);
 });

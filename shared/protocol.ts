@@ -1,4 +1,6 @@
 // Messages exchanged between the browser and the harness server over WebSocket.
+// User-facing text from the server is a `Text` (see shared/i18n): the GUI shows it in the viewer's language.
+import type { Text } from './i18n/index.js';
 // The server runs the agent loop against Ollama and reports progress as `AgentEvent`s.
 
 /**
@@ -57,7 +59,7 @@ export type ClientMessage =
 export interface ApprovalInfo {
   /** Qualifies for auto-approval (no host impact, and the security scan found nothing). */
   auto: boolean;
-  reason: string;
+  reason: Text;
   /** The server already answered "allow" because auto-approval was on. */
   applied: boolean;
   /** Present for git init/add/commit/push: what would be recorded or published was scanned first. */
@@ -69,16 +71,16 @@ export interface SecurityFinding {
   path: string;
   /** `high`: secrets/keys. `warn`: things that usually belong in .gitignore, big files, password-like values. */
   severity: 'high' | 'warn';
-  rule: string;
-  /** Redacted excerpt or count, e.g. "AKIA…(20文字)". Never the full secret. */
-  detail?: string;
+  rule: Text;
+  /** Redacted excerpt or count, e.g. "AKIA…(20 characters)". Never the full secret. */
+  detail?: Text;
   line?: number;
 }
 
 export interface SecurityScan {
   ops: ('init' | 'add' | 'commit' | 'push')[];
   /** Human-readable description of what was scanned. */
-  scope: string;
+  scope: Text;
   checkedFiles: number;
   findings: SecurityFinding[];
   /** File or finding limits were hit, so the scan is incomplete. */
@@ -115,19 +117,19 @@ export type AgentEvent =
   /** The user's prompt (only replayed from history; the GUI shows live prompts itself). `images` as in `ClientMessage`. */
   | { type: 'user'; text: string; images?: string[] }
   /** The harness sent the model a message on its own (e.g. asking to retry a cut-off reply in smaller steps). */
-  | { type: 'notice'; text: string }
+  | { type: 'notice'; text: Text }
   /**
    * Older messages being replaced by a summary, automatically near the context limit or on request.
    * Token counts are estimates of the prompt size.
    */
-  | { type: 'compact'; phase: 'start' | 'done' | 'failed'; auto: boolean; summary?: string; tokensBefore?: number; tokensAfter?: number; message?: string }
+  | { type: 'compact'; phase: 'start' | 'done' | 'failed'; auto: boolean; summary?: string; tokensBefore?: number; tokensAfter?: number; message?: Text }
   /** A finished assistant message. Replaces the streamed deltas. */
   | { type: 'assistant'; text: string; thinking?: string; toolCalls: ToolCall[] }
   | { type: 'toolResult'; id: string; output: string; isError: boolean }
   | { type: 'permission'; id: string; toolName: string; input: Record<string, unknown>; description?: string; approval: ApprovalInfo }
   /** A pending permission prompt was closed without the user's answer (interrupt / stop). */
   | { type: 'permissionCancelled'; id: string }
-  | { type: 'result'; isError: boolean; subtype: 'success' | 'interrupted' | 'error' | 'max_turns'; message?: string; durationMs: number; numTurns: number; stats?: TurnStats };
+  | { type: 'result'; isError: boolean; subtype: 'success' | 'interrupted' | 'error' | 'max_turns'; message?: Text; durationMs: number; numTurns: number; stats?: TurnStats };
 
 export interface ModelInfo {
   name: string;
@@ -156,7 +158,7 @@ export interface OllamaStatus {
   url: string;
   /** Present when Ollama answered. */
   version?: string;
-  error?: string;
+  error?: Text;
 }
 
 /** A saved session (`<data dir>/sessions/<sessionId>.jsonl`). */
@@ -192,4 +194,4 @@ export type ServerMessage =
   /** Past transcript of a resumed session. */
   | { type: 'history'; key: string; sessionId: string; events: AgentEvent[]; omitted: number }
   /** `key` is absent for connection-level errors. */
-  | { type: 'error'; key?: string; message: string };
+  | { type: 'error'; key?: string; message: Text };

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { DEV_SERVER_PORT, DEV_WEB_PORT, PROD_PORT } from '../shared/ports.js';
+import { msg as text, TextError, type Text } from '../shared/i18n/index.js';
 import { MAX_IMAGE_BASE64, MAX_IMAGES } from '../shared/protocol.js';
 import type { ClientMessage, PermissionMode, ServerMessage, SessionSettings, ThinkSetting } from '../shared/protocol.js';
 import { AgentSession, type AgentConfig } from './agent.js';
@@ -35,12 +36,12 @@ const store = new SessionStore();
 
 /** Validated session settings plus the model's capabilities. Throws a message for the user. */
 async function resolveSettings(o: SessionSettings) {
-  if (!o.model) throw new Error('モデルを選んでください');
+  if (!o.model) throw new TextError(text('error.chooseModel'));
   let capabilities: string[];
   try {
     capabilities = await modelCapabilities(o.model);
   } catch (err) {
-    throw new Error(`モデル ${o.model} を使えません: ${describeError(err)}`);
+    throw new TextError(text('error.modelUnavailable', { model: o.model, reason: describeError(err) }));
   }
   return {
     model: o.model,
@@ -53,12 +54,12 @@ async function resolveSettings(o: SessionSettings) {
 }
 
 /** Images from the client: plain base64, within the limits. Returns an error message, or undefined when valid. */
-function checkImages(images: unknown): string | undefined {
+function checkImages(images: unknown): Text | undefined {
   if (images === undefined) return;
-  if (!Array.isArray(images) || images.length > MAX_IMAGES) return `画像は 1 回に ${MAX_IMAGES} 枚までです`;
+  if (!Array.isArray(images) || images.length > MAX_IMAGES) return text('error.tooManyImages', { max: MAX_IMAGES });
   for (const img of images) {
     if (typeof img !== 'string' || !img || img.length > MAX_IMAGE_BASE64 || !/^[A-Za-z0-9+/]+=*$/.test(img)) {
-      return '画像の形式が正しくないか、大きすぎます';
+      return text('error.badImage');
     }
   }
 }
@@ -117,21 +118,21 @@ wss.on('connection', (ws: WebSocket) => {
     const o = msg.options;
     const cwd = path.resolve(o.cwd || DEFAULT_CWD);
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
-      return send({ type: 'error', key, message: `作業フォルダが存在しません: ${cwd}` });
+      return send({ type: 'error', key, message: text('error.noFolder', { path: cwd }) });
     }
     let settings: Awaited<ReturnType<typeof resolveSettings>>;
     try {
       settings = await resolveSettings(o);
     } catch (err) {
-      return send({ type: 'error', key, message: (err as Error).message });
+      return send({ type: 'error', key, message: err instanceof TextError ? err.text : String(err) });
     }
     const records = o.resume ? await store.load(o.resume) : undefined;
-    if (o.resume && !records) return send({ type: 'error', key, message: `セッション履歴が見つかりません: ${o.resume}` });
+    if (o.resume && !records) return send({ type: 'error', key, message: text('error.noHistory', { id: o.resume }) });
     // Superseded by another start/stop for this tab, or the socket closed, while loading.
     if (starting.get(key) !== token) return;
     starting.delete(key);
     if (sessions.size >= MAX_SESSIONS) {
-      return send({ type: 'error', key, message: `同時に開けるセッションは ${MAX_SESSIONS} 個までです` });
+      return send({ type: 'error', key, message: text('error.tooManySessions', { max: MAX_SESSIONS }) });
     }
 
     const s = new AgentSession(
@@ -176,7 +177,7 @@ wss.on('connection', (ws: WebSocket) => {
         store
           .list()
           .then(async (list) => send({ type: 'sessions', sessions: list, folders: await listFolders(list) }))
-          .catch((err) => send({ type: 'error', message: `履歴の読み込みに失敗: ${err}` }));
+          .catch((err) => send({ type: 'error', message: text('error.historyLoad', { reason: String(err) }) }));
         return;
     }
     if (!isValidKey(msg.key)) return send({ type: 'error', message: 'Invalid session key' });
@@ -187,13 +188,13 @@ wss.on('connection', (ws: WebSocket) => {
         break;
       case 'user': {
         const s = sessions.get(msg.key);
-        if (!s) return send({ type: 'error', key: msg.key, message: 'セッションが開始されていません' });
-        if (s.busy) return send({ type: 'error', key: msg.key, message: '応答中です。中断してから送信してください' });
+        if (!s) return send({ type: 'error', key: msg.key, message: text('error.notStarted') });
+        if (s.busy) return send({ type: 'error', key: msg.key, message: text('error.busySend') });
         const badImages = checkImages(msg.images);
         if (badImages) return send({ type: 'error', key: msg.key, message: badImages });
         const images = msg.images?.length ? msg.images : undefined;
         if (images && !s.config.capabilities.includes('vision')) {
-          return send({ type: 'error', key: msg.key, message: `${s.config.model} は画像入力に対応していません` });
+          return send({ type: 'error', key: msg.key, message: text('error.noVision', { model: s.config.model }) });
         }
         if (typeof msg.text !== 'string' || (!msg.text.trim() && !images)) return;
         s.sendUser(msg.text, images).catch((err) => send({ type: 'error', key: msg.key, message: String(err) }));
@@ -201,12 +202,12 @@ wss.on('connection', (ws: WebSocket) => {
       }
       case 'configure': {
         const s = sessions.get(msg.key);
-        if (!s) return send({ type: 'error', key: msg.key, message: 'セッションが開始されていません' });
+        if (!s) return send({ type: 'error', key: msg.key, message: text('error.notStarted') });
         resolveSettings(msg.options ?? {})
           .then((settings) => {
-            if (!s.configure(settings)) send({ type: 'error', key: msg.key, message: '応答中は設定を変更できません。終わってから変更してください' });
+            if (!s.configure(settings)) send({ type: 'error', key: msg.key, message: text('error.busyConfigure') });
           })
-          .catch((err) => send({ type: 'error', key: msg.key, message: (err as Error).message }));
+          .catch((err) => send({ type: 'error', key: msg.key, message: err instanceof TextError ? err.text : String(err) }));
         break;
       }
       case 'permission':
@@ -214,8 +215,8 @@ wss.on('connection', (ws: WebSocket) => {
         break;
       case 'compact': {
         const s = sessions.get(msg.key);
-        if (!s) return send({ type: 'error', key: msg.key, message: 'セッションが開始されていません' });
-        if (s.busy) return send({ type: 'error', key: msg.key, message: '応答中です。終わってから要約してください' });
+        if (!s) return send({ type: 'error', key: msg.key, message: text('error.notStarted') });
+        if (s.busy) return send({ type: 'error', key: msg.key, message: text('error.busyCompact') });
         s.compactNow().catch((err) => send({ type: 'error', key: msg.key, message: String(err) }));
         break;
       }

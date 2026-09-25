@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { SessionSummary } from '../../../shared/protocol';
+import { t, tNodes, tx } from '../i18n';
 import type { State } from '../state';
 import { baseName, formatDate, samePath } from '../util';
 
@@ -23,27 +24,27 @@ export function Welcome({ state, cwd, canStart, openSessionIds, onSelectFolder, 
     <div className="welcome">
       <OllamaBanner state={state} />
       <section>
-        <h2>最近の作業フォルダ</h2>
-        {state.folders.length === 0 && <div className="muted">まだ履歴がありません。左の「作業フォルダ」にパスを入力して開始してください。</div>}
+        <h2>{t('welcome.recentFolders')}</h2>
+        {state.folders.length === 0 && <div className="muted">{t('welcome.noFolders')}</div>}
         <ul className="folders">
           {!known && cwd && (
             <li className="selected" title={cwd}>
               <div className="f-name">{baseName(cwd)}</div>
               <div className="f-path">{cwd}</div>
-              <div className="f-meta">履歴なし</div>
+              <div className="f-meta">{t('welcome.noHistory')}</div>
             </li>
           )}
           {state.folders.map((f) => (
             <li
               key={f.path}
               className={`${samePath(f.path, cwd) ? 'selected' : ''} ${f.exists ? '' : 'missing'}`}
-              title={f.exists ? f.path : `${f.path}\n（フォルダが見つかりません）`}
+              title={f.exists ? f.path : t('welcome.folderMissingTitle', { path: f.path })}
               onClick={() => f.exists && onSelectFolder(f.path)}
             >
               <div className="f-name">{baseName(f.path)}</div>
               <div className="f-path">{f.path}</div>
               <div className="f-meta">
-                {f.exists ? `${formatDate(f.lastUsed)} · ${f.sessionCount} セッション` : 'フォルダが見つかりません'}
+                {f.exists ? t('welcome.folderMeta', { date: formatDate(f.lastUsed), count: f.sessionCount }) : t('welcome.folderMissing')}
               </div>
             </li>
           ))}
@@ -52,18 +53,20 @@ export function Welcome({ state, cwd, canStart, openSessionIds, onSelectFolder, 
 
       <section>
         <h2>
-          <span className="w-folder" title={cwd}>{baseName(cwd) || '(未選択)'}</span> のセッション
+          {tNodes('welcome.sessionsOf', {
+            folder: <span className="w-folder" title={cwd}>{baseName(cwd) || t('welcome.unselected')}</span>,
+          })}
         </h2>
         <button className="primary" disabled={!canStart || !cwd} onClick={() => onStartNew(cwd)}>
-          このフォルダで新しく開始
+          {t('welcome.startHere')}
         </button>
         <ul className="w-sessions">
-          {sessions.length === 0 && <li className="muted">このフォルダの履歴はありません</li>}
+          {sessions.length === 0 && <li className="muted">{t('welcome.noSessions')}</li>}
           {sessions.map((s) => (
-            <li key={s.sessionId} title={`ID: ${s.sessionId}\nクリックで再開`} onClick={() => onResume(s)}>
-              <div className="h-title">{s.title ?? s.firstPrompt ?? '(無題)'}</div>
+            <li key={s.sessionId} title={t('welcome.sessionTitle', { id: s.sessionId })} onClick={() => onResume(s)}>
+              <div className="h-title">{s.title ?? s.firstPrompt ?? t('common.untitled')}</div>
               <SessionMeta s={s} open={openSessionIds.has(s.sessionId)} />
-              {s.lastPrompt && s.lastPrompt !== s.firstPrompt && <div className="h-meta h-last">最後: {s.lastPrompt}</div>}
+              {s.lastPrompt && s.lastPrompt !== s.firstPrompt && <div className="h-meta h-last">{t('welcome.last', { prompt: s.lastPrompt })}</div>}
             </li>
           ))}
         </ul>
@@ -78,19 +81,17 @@ function OllamaBanner({ state }: { state: State }) {
   if (state.ollama.error) {
     return (
       <div className="banner ng">
-        <b>Ollama に接続できません</b>
-        <div>{state.ollama.error}</div>
-        <div className="muted">Ollama アプリを起動するか、ターミナルで <code>ollama serve</code> を実行してください。</div>
+        <b>{t('welcome.ollamaDown')}</b>
+        <div>{tx(state.ollama.error)}</div>
+        <div className="muted">{tNodes('welcome.ollamaDownHint', { command: <code>ollama serve</code> })}</div>
       </div>
     );
   }
   if (state.models.length === 0) {
     return (
       <div className="banner warn">
-        <b>モデルがありません</b>
-        <div className="muted">
-          ターミナルで <code>ollama pull qwen3-coder:30b</code> などを実行してから、左の「更新」を押してください。
-        </div>
+        <b>{t('welcome.noModels')}</b>
+        <div className="muted">{tNodes('welcome.noModelsHint', { command: <code>ollama pull qwen3-coder:30b</code> })}</div>
       </div>
     );
   }
@@ -110,32 +111,32 @@ export function SessionHistory({ state, cwd, activeSessionId, openSessionIds, on
   return (
     <div className="history">
       <div className="history-head">
-        <b>セッション履歴</b>
-        <button className="small" onClick={onRefresh}>更新</button>
+        <b>{t('history.title')}</b>
+        <button className="small" onClick={onRefresh}>{t('common.refresh')}</button>
       </div>
       <label className="check">
         <input type="checkbox" checked={onlyCwd} onChange={(e) => setOnlyCwd(e.target.checked)} />
-        この作業フォルダのみ
+        {t('history.thisFolder')}
       </label>
       <ul>
-        {list.length === 0 && <li className="muted">履歴なし</li>}
+        {list.length === 0 && <li className="muted">{t('history.empty')}</li>}
         {list.map((s) => (
           <li
             key={s.sessionId}
             className={s.sessionId === activeSessionId ? 'current' : ''}
             title={[
               `ID: ${s.sessionId}`,
-              `フォルダ: ${s.cwd}`,
-              s.model && `モデル: ${s.model}`,
-              s.createdAt && `開始: ${formatDate(s.createdAt)}`,
-              `更新: ${formatDate(s.updatedAt)}`,
-              s.firstPrompt && `最初: ${s.firstPrompt}`,
-              s.lastPrompt && `最後: ${s.lastPrompt}`,
-              openSessionIds.has(s.sessionId) ? 'クリックでそのタブへ移動' : 'クリックで再開（モデル等は左の設定で再開します）',
+              t('history.folder', { value: s.cwd }),
+              s.model && t('history.model', { value: s.model }),
+              s.createdAt && t('history.started', { value: formatDate(s.createdAt) }),
+              t('history.updated', { value: formatDate(s.updatedAt) }),
+              s.firstPrompt && t('history.first', { value: s.firstPrompt }),
+              s.lastPrompt && t('history.last', { value: s.lastPrompt }),
+              t(openSessionIds.has(s.sessionId) ? 'history.goToTab' : 'history.clickToResume'),
             ].filter(Boolean).join('\n')}
             onClick={() => onResume(s)}
           >
-            <div className="h-title">{s.title ?? s.firstPrompt ?? '(無題)'}</div>
+            <div className="h-title">{s.title ?? s.firstPrompt ?? t('common.untitled')}</div>
             <SessionMeta s={s} open={openSessionIds.has(s.sessionId)} folder={onlyCwd ? undefined : baseName(s.cwd)} />
           </li>
         ))}
@@ -149,8 +150,8 @@ function SessionMeta({ s, open, folder }: { s: SessionSummary; open: boolean; fo
     <div className="h-meta">
       <span>{formatDate(s.updatedAt)}</span>
       {s.model && <span className="badge model" title={s.model}>{s.model}</span>}
-      <span>{s.promptCount}件</span>
-      {open && <span className="badge open">タブで開いています</span>}
+      <span>{t('history.prompts', { count: s.promptCount })}</span>
+      {open && <span className="badge open">{t('history.openInTab')}</span>}
       {folder && <span className="h-cwd">{folder}</span>}
     </div>
   );

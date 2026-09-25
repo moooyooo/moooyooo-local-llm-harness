@@ -1,3 +1,4 @@
+import { msg } from '../shared/i18n/index.js';
 import type { ApprovalInfo, PermissionMode } from '../shared/protocol.js';
 import {
   classifyPermission,
@@ -65,8 +66,8 @@ export async function assess(toolName: string, input: Record<string, unknown>, c
   const shell = shellKindOf(toolName);
   const ops = shell ? gitOperations(String(input.command ?? ''), shell) : [];
   const security = ops.length ? await scanBeforeGit(ops, cwd) : undefined;
-  if (security?.error) decision = manual(`セキュリティチェックに失敗（${security.error}）`);
-  else if (security?.findings.length) decision = manual(`セキュリティチェックで ${security.findings.length} 件の注意点`);
-  else if (security?.truncated) decision = manual('セキュリティチェックが上限に達し、一部未確認');
+  if (security?.error) decision = manual(msg('approve.scanFailed', { error: security.error }));
+  else if (security?.findings.length) decision = manual(msg('approve.scanFindings', { count: security.findings.length }));
+  else if (security?.truncated) decision = manual(msg('approve.scanTruncated'));
   return { ...decision, security };
 }

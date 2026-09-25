@@ -11,6 +11,8 @@ import type {
   ThinkSetting,
   TurnStats,
 } from '../../shared/protocol';
+import { msg as text, type Text } from '../../shared/i18n';
+import { t } from './i18n';
 import { imageDataUrl } from './images';
 import { baseName } from './util';
 
@@ -31,7 +33,7 @@ export type Item =
       status: 'pending' | 'allowed' | 'denied' | 'auto' | 'cancelled';
       /** Qualifies for auto-approval (no host impact), with the classifier's reason. */
       autoEligible: boolean;
-      reason?: string;
+      reason?: Text;
       /** Pre-commit/push security scan (git init/add/commit/push only). */
       security?: SecurityScan;
     }
@@ -39,15 +41,16 @@ export type Item =
       kind: 'result';
       id: string;
       isError: boolean;
-      subtype: string;
-      message?: string;
+      subtype: Extract<AgentEvent, { type: 'result' }>['subtype'];
+      message?: Text;
       durationMs: number;
       numTurns: number;
       stats?: TurnStats;
       /** The turn stopped before the model finished (error, interrupt, limit, cut-off), so continuing is offered. */
       unfinished: boolean;
     }
-  | { kind: 'notice'; id: string; level: 'info' | 'error'; text: string }
+  /** Kept as `Text`, so it follows the language when that changes. */
+  | { kind: 'notice'; id: string; level: 'info' | 'error'; text: Text }
   /** Older messages were replaced by this summary (estimated prompt tokens before → after). */
   | { kind: 'compact'; id: string; auto: boolean; summary: string; tokensBefore?: number; tokensAfter?: number };
 
@@ -133,7 +136,7 @@ export function tabCwd(state: State, tab: Tab): string {
 }
 
 export function tabLabel(state: State, tab: Tab): string {
-  return baseName(tabCwd(state, tab)) || '新しいタブ';
+  return baseName(tabCwd(state, tab)) || t('tabs.untitled');
 }
 
 export function pendingPermissions(tab: Tab): PermissionItem[] {
@@ -243,9 +246,9 @@ function onServer(state: State, msg: ServerMessage, at: number): State {
     case 'history':
       return updateTab(state, msg.key, (t) => {
         let next = t;
-        if (msg.omitted > 0) next = pushItems(next, notice(`（古い ${msg.omitted} 件は省略）`));
+        if (msg.omitted > 0) next = pushItems(next, notice(text('history.omitted', { count: msg.omitted })));
         for (const ev of msg.events) next = onEvent(next, ev);
-        return pushItems({ ...next, busy: false }, notice(`— ここまで過去の会話（${msg.sessionId.slice(0, 8)}…）—`));
+        return pushItems({ ...next, busy: false }, notice(text('history.end', { id: msg.sessionId.slice(0, 8) })));
       });
     case 'event': {
       const unread = msg.ev.type === 'result' && msg.key !== state.activeKey;
@@ -254,8 +257,8 @@ function onServer(state: State, msg: ServerMessage, at: number): State {
   }
 }
 
-function notice(text: string): Item {
-  return { kind: 'notice', id: nextId(), level: 'info', text };
+function notice(value: Text): Item {
+  return { kind: 'notice', id: nextId(), level: 'info', text: value };
 }
 
 function onEvent(tab: Tab, ev: AgentEvent): Tab {
@@ -278,7 +281,8 @@ function onEvent(tab: Tab, ev: AgentEvent): Tab {
       if (ev.phase === 'start') return { ...tab, busy, compacting: true };
       const next = { ...tab, busy, compacting: false };
       if (ev.phase === 'failed') {
-        return pushItems(next, { kind: 'notice', id: nextId(), level: 'error', text: `会話の要約に失敗しました: ${ev.message ?? '不明なエラー'}` });
+        const reason = ev.message ?? text('common.unknownError');
+        return pushItems(next, { kind: 'notice', id: nextId(), level: 'error', text: text('transcript.compactFailed', { reason }) });
       }
       const { auto, tokensBefore, tokensAfter } = ev;
       return {
@@ -331,7 +335,7 @@ function onEvent(tab: Tab, ev: AgentEvent): Tab {
           kind: 'result',
           id: nextId(),
           isError: ev.isError,
-          subtype: RESULT_LABEL[ev.subtype] ?? ev.subtype,
+          subtype: ev.subtype,
           message: ev.message,
           durationMs: ev.durationMs,
           numTurns: ev.numTurns,
@@ -347,13 +351,6 @@ function onEvent(tab: Tab, ev: AgentEvent): Tab {
       };
   }
 }
-
-const RESULT_LABEL: Record<string, string> = {
-  success: '完了',
-  interrupted: '中断しました',
-  error: 'エラー',
-  max_turns: '上限で停止',
-};
 
 function pushItems(tab: Tab, ...items: Item[]): Tab {
   return items.length ? { ...tab, items: [...tab.items, ...items] } : tab;

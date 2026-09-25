@@ -2,16 +2,13 @@ import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { SecurityScan, TurnStats } from '../../../shared/protocol';
+import { t, tNodes, tx } from '../i18n';
 import { imageFiles, type Attachment } from '../images';
 import { pendingPermissions, type Item, type PermissionItem, type Tab } from '../state';
 import { formatDuration, formatTokens, lineDiff, summarizeInput, truncate } from '../util';
 
 export type PermissionHandler = (id: string, allow: boolean) => void;
 
-/** Sent by the 「続きから再開」 button after a turn stopped early. */
-const CONTINUE_PROMPT =
-  '前回の作業は途中で止まりました。作業フォルダを確認して、どこまで終わっているかを短くまとめてから、残りの作業を続けてください。' +
-  '大きなファイルは一度に書かず、小さく分けて書いてください。';
 /** Seconds without output before the waiting time is shown, and before the hint about long tool calls. */
 const QUIET_SHOW = 10;
 const QUIET_HINT = 60;
@@ -41,16 +38,14 @@ export function Transcript({ tab, onPermission, onSend }: {
     <div className="transcript">
       {tab.items.length === 0 && !streaming && (
         <div className="empty">
-          セッションを開始しました。メッセージを送信してください。
-          {tab.session && !tab.session.tools && (
-            <div className="hint">このモデルはツール呼び出しに対応していないため、会話のみです（ファイルの読み書きやコマンド実行はできません）。</div>
-          )}
+          {t('transcript.started')}
+          {tab.session && !tab.session.tools && <div className="hint">{t('transcript.noTools')}</div>}
         </div>
       )}
       {tab.items.map((it) => <ItemView key={it.id} item={it} onPermission={onPermission} />)}
       {tab.streamThinking && (
         <details className="thinking streaming" open>
-          <summary>思考中…</summary>
+          <summary>{t('transcript.thinkingLive')}</summary>
           <pre>{tab.streamThinking}</pre>
         </details>
       )}
@@ -62,8 +57,11 @@ export function Transcript({ tab, onPermission, onSend }: {
       {waiting && <Waiting since={tab.lastActivity ?? Date.now()} streaming={streaming} compacting={!!tab.compacting} />}
       {canContinue && (
         <div className="continue">
-          <button className="primary" title={CONTINUE_PROMPT} onClick={() => onSend(CONTINUE_PROMPT)}>続きから再開</button>
-          <span className="muted">作業フォルダの状態を確認させてから、残りを続けさせます</span>
+          {/* The prompt follows the GUI language, so the model answers in it. */}
+          <button className="primary" title={t('transcript.continuePrompt')} onClick={() => onSend(t('transcript.continuePrompt'))}>
+            {t('transcript.continue')}
+          </button>
+          <span className="muted">{t('transcript.continueHint')}</span>
         </div>
       )}
       <div ref={endRef} />
@@ -82,12 +80,10 @@ function Waiting({ since, streaming, compacting }: { since: number; streaming: b
   if (streaming && quiet < QUIET_SHOW) return null;
   return (
     <div className="thinking-dots">
-      {compacting ? 'コンテキストを空けるため、会話を要約しています…' : '考え中…'}
-      {quiet >= QUIET_SHOW && <span title="最後の出力からの経過時間"> {formatDuration(quiet)}</span>}
+      {t(compacting ? 'transcript.compacting' : 'transcript.waiting')}
+      {quiet >= QUIET_SHOW && <span title={t('transcript.quietTitle')}> {formatDuration(quiet)}</span>}
       {quiet >= QUIET_HINT && !compacting && (
-        <div className="hint-muted">
-          ファイルの中身などを含むツール呼び出しは、書き終わるまで何も表示されません。長すぎる場合は「中断」して、小さく分けるよう指示してください。
-        </div>
+        <div className="hint-muted">{t('transcript.quietHint')}</div>
       )}
     </div>
   );
@@ -111,7 +107,7 @@ function ItemView({ item, onPermission }: { item: Item; onPermission: Permission
     case 'thinking':
       return (
         <details className="thinking">
-          <summary>思考</summary>
+          <summary>{t('transcript.thinking')}</summary>
           <pre>{item.text}</pre>
         </details>
       );
@@ -130,21 +126,24 @@ function ItemView({ item, onPermission }: { item: Item; onPermission: Permission
     case 'result':
       return (
         <div className={`result ${item.isError ? 'error' : ''}`}>
-          {item.subtype} · {item.numTurns} turns · {(item.durationMs / 1000).toFixed(1)}s
+          {t(`result.${item.subtype}`)} · {item.numTurns} turns · {(item.durationMs / 1000).toFixed(1)}s
           {item.stats && <StatsText stats={item.stats} />}
-          {item.message && <div>{item.message}</div>}
+          {item.message && <div>{tx(item.message)}</div>}
         </div>
       );
     case 'notice':
-      return <div className={`notice ${item.level}`}>{item.text}</div>;
+      return <div className={`notice ${item.level}`}>{tx(item.text)}</div>;
     case 'compact':
       return (
         <details className="compaction">
           <summary>
-            会話を要約しました（{item.auto ? 'コンテキストが一杯に近づいたため自動' : '手動'}
-            {item.tokensBefore != null && item.tokensAfter != null &&
-              `・約 ${item.tokensBefore.toLocaleString()} → ${item.tokensAfter.toLocaleString()} トークン`}
-            ）
+            {t('transcript.compacted', {
+              how: t(item.auto ? 'transcript.compactedAuto' : 'transcript.compactedManual'),
+              tokens:
+                item.tokensBefore != null && item.tokensAfter != null
+                  ? t('transcript.compactedTokens', { before: item.tokensBefore.toLocaleString(), after: item.tokensAfter.toLocaleString() })
+                  : '',
+            })}
           </summary>
           <div className="compaction-body">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.summary}</ReactMarkdown>
@@ -159,12 +158,12 @@ function StatsText({ stats }: { stats: TurnStats }) {
   return (
     <>
       {' · '}
-      <span title="最後のモデル呼び出しの入力トークン → 出力トークン">
+      <span title={t('transcript.tokensTitle')}>
         {stats.promptTokens.toLocaleString()} → {stats.evalTokens.toLocaleString()} tok
       </span>
       {stats.tokensPerSec != null && ` · ${stats.tokensPerSec.toFixed(1)} tok/s`}
       {pct != null && stats.contextMax && (
-        <span title={`コンテキスト ${stats.contextUsed.toLocaleString()} / ${stats.contextMax.toLocaleString()}`}>
+        <span title={t('transcript.contextTitle', { used: stats.contextUsed.toLocaleString(), max: stats.contextMax.toLocaleString() })}>
           {` · ctx ${pct}% / ${formatTokens(stats.contextMax)}`}
         </span>
       )}
@@ -180,7 +179,7 @@ function ToolInput({ name, input, max = 8000 }: { name: string; input: Record<st
       <div className="tool-input">
         <div className="path">
           {s(input.file_path)}
-          {input.replace_all === true && <span className="muted">（すべて置換）</span>}
+          {input.replace_all === true && <span className="muted">{t('transcript.replaceAll')}</span>}
         </div>
         <pre className="diff">
           {lineDiff(truncate(s(input.old_string), max / 2), truncate(s(input.new_string), max / 2)).map((l, i) => (
@@ -193,7 +192,7 @@ function ToolInput({ name, input, max = 8000 }: { name: string; input: Record<st
   if (name === 'Write' && typeof input.content === 'string') {
     return (
       <div className="tool-input">
-        <div className="path">{s(input.file_path)}（新規作成・上書き）</div>
+        <div className="path">{t('transcript.writeFile', { path: s(input.file_path) })}</div>
         <pre>{truncate(input.content, max)}</pre>
       </div>
     );
@@ -204,7 +203,7 @@ function ToolInput({ name, input, max = 8000 }: { name: string; input: Record<st
   return <pre>{truncate(JSON.stringify(input, null, 2), max)}</pre>;
 }
 
-const STATUS_TEXT = { allowed: '許可しました', denied: '拒否しました', cancelled: '中断により取り消されました' } as const;
+const STATUS_TEXT = { allowed: 'permission.allowed', denied: 'permission.denied', cancelled: 'permission.cancelled' } as const;
 
 /** Used both inline in the transcript and in the permission inbox. */
 export function PermissionCard({ item, onPermission, compact }: {
@@ -216,19 +215,19 @@ export function PermissionCard({ item, onPermission, compact }: {
   if (item.status === 'auto') {
     return (
       <div className="permission-auto" title={JSON.stringify(item.input, null, 2)}>
-        ✓ 自動承認: <b>{item.toolName}</b> <span className="tool-summary">{summarizeInput(item.input)}</span>
-        {item.reason && <span className="muted">（{item.reason}）</span>}
-        {item.security && <span className="sec-ok"> 🔒 セキュリティチェック問題なし（{item.security.checkedFiles} ファイル）</span>}
+        {tNodes('permission.auto', { tool: <b>{item.toolName}</b> })} <span className="tool-summary">{summarizeInput(item.input)}</span>
+        {item.reason && <span className="muted">{t('permission.autoReason', { reason: tx(item.reason) })}</span>}
+        {item.security && <span className="sec-ok">{t('permission.autoScanOk', { files: item.security.checkedFiles })}</span>}
       </div>
     );
   }
   return (
     <div className={`permission ${item.status} ${compact ? 'compact' : ''}`}>
       <div>
-        <b>{item.toolName}</b> の実行許可 {item.description && <span className="muted">— {item.description}</span>}
+        {tNodes('permission.request', { tool: <b>{item.toolName}</b> })} {item.description && <span className="muted">— {item.description}</span>}
       </div>
       {item.status === 'pending' && !item.autoEligible && item.reason && (
-        <div className="perm-reason">自動承認の対象外: {item.reason}</div>
+        <div className="perm-reason">{t('permission.notAuto', { reason: tx(item.reason) })}</div>
       )}
       {compact ? (
         <div className="tool-summary">{summarizeInput(item.input)}</div>
@@ -238,11 +237,11 @@ export function PermissionCard({ item, onPermission, compact }: {
       {item.security && <SecurityReport scan={item.security} compact={compact} />}
       {item.status === 'pending' ? (
         <div className="row">
-          <button className="primary" onClick={() => onPermission(item.id, true)}>許可</button>
-          <button onClick={() => onPermission(item.id, false)}>拒否</button>
+          <button className="primary" onClick={() => onPermission(item.id, true)}>{t('permission.allow')}</button>
+          <button onClick={() => onPermission(item.id, false)}>{t('permission.deny')}</button>
         </div>
       ) : (
-        <div className="muted">{STATUS_TEXT[item.status]}</div>
+        <div className="muted">{t(STATUS_TEXT[item.status])}</div>
       )}
     </div>
   );
@@ -253,11 +252,11 @@ const OP_LABEL = { init: 'init', add: 'add', commit: 'commit', push: 'push' } as
 /** Result of the pre-commit/push scan shown on a git permission prompt. */
 function SecurityReport({ scan, compact }: { scan: SecurityScan; compact?: boolean }) {
   const ops = scan.ops.map((o) => `git ${OP_LABEL[o]}`).join(' / ');
-  if (scan.error) return <div className="sec sec-error">🔒 {ops} 前のセキュリティチェックに失敗しました: {scan.error}</div>;
+  if (scan.error) return <div className="sec sec-error">{t('security.failed', { ops, error: scan.error })}</div>;
   if (!scan.findings.length) {
     return (
       <div className="sec sec-clean">
-        🔒 {ops} 前のセキュリティチェック: 問題なし（{scan.checkedFiles} ファイル確認{scan.truncated ? '・上限に達したため一部未確認' : ''}）
+        {t('security.clean', { ops, files: scan.checkedFiles, partial: scan.truncated ? t('security.partial') : '' })}
       </div>
     );
   }
@@ -266,21 +265,21 @@ function SecurityReport({ scan, compact }: { scan: SecurityScan; compact?: boole
   return (
     <div className={`sec ${high ? 'sec-high' : 'sec-warn'}`}>
       <div>
-        <b>⚠ {ops} 前のセキュリティチェック: {scan.findings.length} 件</b>
-        {high > 0 && <span>（うち重大 {high} 件）</span>}
-        <span className="muted"> — {scan.scope}、{scan.checkedFiles} ファイル確認</span>
+        <b>{t('security.found', { ops, count: scan.findings.length })}</b>
+        {high > 0 && <span>{t('security.foundHigh', { count: high })}</span>}
+        <span className="muted">{t('security.scope', { scope: tx(scan.scope), files: scan.checkedFiles })}</span>
       </div>
       <ul>
         {shown.map((f, i) => (
           <li key={i} className={f.severity}>
-            <code>{f.path}{f.line ? `:${f.line}` : ''}</code> {f.rule}
-            {f.detail && <span className="muted"> {f.detail}</span>}
+            <code>{f.path}{f.line ? `:${f.line}` : ''}</code> {tx(f.rule)}
+            {f.detail && <span className="muted"> {tx(f.detail)}</span>}
           </li>
         ))}
-        {shown.length < scan.findings.length && <li className="muted">…ほか {scan.findings.length - shown.length} 件</li>}
+        {shown.length < scan.findings.length && <li className="muted">{t('security.more', { count: scan.findings.length - shown.length })}</li>}
       </ul>
-      {scan.truncated && <div className="muted">上限に達したため、一部のファイルは未確認です。</div>}
-      <div className="muted">.gitignore への追加やファイルの除外を指示してから、もう一度実行させることをおすすめします。</div>
+      {scan.truncated && <div className="muted">{t('security.truncated')}</div>}
+      <div className="muted">{t('security.advice')}</div>
     </div>
   );
 }
@@ -323,16 +322,16 @@ export function Composer({ text, setText, attachments, canAttach, note, disabled
     onAddImages(files);
   };
   const placeholder = disabled
-    ? 'セッションを開始してください'
-    : `メッセージ（Enterで送信 / Shift+Enterで改行${canAttach ? ' / 画像は貼り付け・ドロップでも添付' : ''}）`;
+    ? t('composer.startFirst')
+    : t('composer.placeholder', { images: canAttach ? t('composer.placeholderImages') : '' });
   return (
     <div className="composer">
       {attachments.length > 0 && (
         <div className="attachments">
           {attachments.map((a) => (
             <div key={a.id} className="attachment">
-              <img src={a.dataUrl} alt="添付画像" />
-              <button className="remove" title="外す" onClick={() => onRemoveImage(a.id)}>×</button>
+              <img src={a.dataUrl} alt={t('composer.attachedImage')} />
+              <button className="remove" title={t('composer.removeImage')} onClick={() => onRemoveImage(a.id)}>×</button>
             </div>
           ))}
         </div>
@@ -342,10 +341,10 @@ export function Composer({ text, setText, attachments, canAttach, note, disabled
         <button
           className="attach"
           disabled={disabled || !canAttach}
-          title={canAttach ? '画像を添付（貼り付け・ドロップでも可）' : 'このモデルは画像入力に対応していません'}
+          title={t(canAttach ? 'composer.attachHint' : 'composer.attachUnsupported')}
           onClick={() => fileRef.current?.click()}
         >
-          画像
+          {t('composer.attach')}
         </button>
         <input
           ref={fileRef}
@@ -367,9 +366,9 @@ export function Composer({ text, setText, attachments, canAttach, note, disabled
           onPaste={onPaste}
         />
         {busy ? (
-          <button onClick={onInterrupt}>中断</button>
+          <button onClick={onInterrupt}>{t('composer.interrupt')}</button>
         ) : (
-          <button className="primary" disabled={!canSend} onClick={submit}>送信</button>
+          <button className="primary" disabled={!canSend} onClick={submit}>{t('composer.send')}</button>
         )}
       </div>
     </div>
@@ -382,7 +381,7 @@ function Thumbs({ images }: { images: string[] }) {
   return (
     <div className="thumbs">
       {images.map((src, i) => (
-        <img key={i} src={src} alt={`添付画像 ${i + 1}`} className={open === i ? 'open' : ''} onClick={() => setOpen(open === i ? undefined : i)} />
+        <img key={i} src={src} alt={t('composer.attachedImageN', { n: i + 1 })} className={open === i ? 'open' : ''} onClick={() => setOpen(open === i ? undefined : i)} />
       ))}
     </div>
   );

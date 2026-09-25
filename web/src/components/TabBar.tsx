@@ -1,12 +1,14 @@
 import { useState } from 'react';
+import type { MessageKey } from '../../../shared/i18n';
+import { t } from '../i18n';
 import { pendingPermissions, tabCwd, tabLabel, tabStatus, type State, type TabStatus } from '../state';
 import { PermissionCard } from './Transcript';
 
-const STATUS_LABEL: Record<TabStatus, string> = {
-  permission: '許可待ち',
-  busy: '応答中',
-  idle: '待機中',
-  stopped: '未開始 / 停止',
+const STATUS_LABEL: Record<TabStatus, MessageKey> = {
+  permission: 'tabs.status.permission',
+  busy: 'tabs.status.busy',
+  idle: 'tabs.status.idle',
+  stopped: 'tabs.status.stopped',
 };
 
 export function TabBar({ state, onActivate, onClose, onNew, onPermission }: {
@@ -30,7 +32,7 @@ export function TabBar({ state, onActivate, onClose, onNew, onPermission }: {
               role="tab"
               aria-selected={tab.key === state.activeKey}
               className={`tab ${tab.key === state.activeKey ? 'active' : ''}`}
-              title={[tabCwd(state, tab), tab.session?.model, STATUS_LABEL[status]].filter(Boolean).join('\n')}
+              title={[tabCwd(state, tab), tab.session?.model, t(STATUS_LABEL[status])].filter(Boolean).join('\n')}
               onClick={() => onActivate(tab.key)}
               onAuxClick={(e) => e.button === 1 && onClose(tab.key)}
             >
@@ -38,7 +40,7 @@ export function TabBar({ state, onActivate, onClose, onNew, onPermission }: {
               <span className="tab-label">{tabLabel(state, tab)}</span>
               <button
                 className="tab-close"
-                title="タブを閉じる（セッションは終了します）"
+                title={t('tabs.close')}
                 onClick={(e) => {
                   e.stopPropagation();
                   onClose(tab.key);
@@ -49,23 +51,23 @@ export function TabBar({ state, onActivate, onClose, onNew, onPermission }: {
             </div>
           );
         })}
-        <button className="tab-new" title="新しいタブ" onClick={onNew}>＋</button>
+        <button className="tab-new" title={t('tabs.new')} onClick={onNew}>＋</button>
       </div>
 
       <div className="inbox-wrap">
         <button className={`inbox-btn ${inbox.length ? 'has' : ''}`} onClick={() => setInboxOpen(!inboxOpen)}>
-          許可待ち <b>{inbox.length}</b>
+          {t('tabs.inbox')} <b>{inbox.length}</b>
         </button>
         {inboxOpen && (
           <div className="inbox">
             <div className="inbox-head">
-              <b>許可の受信箱</b>
-              <button className="small" onClick={() => setInboxOpen(false)}>閉じる</button>
+              <b>{t('tabs.inboxTitle')}</b>
+              <button className="small" onClick={() => setInboxOpen(false)}>{t('common.close')}</button>
             </div>
-            {inbox.length === 0 && <div className="muted">許可待ちはありません</div>}
+            {inbox.length === 0 && <div className="muted">{t('tabs.inboxEmpty')}</div>}
             {inbox.map(({ tab, item }) => (
               <div key={`${tab.key}:${item.id}`} className="inbox-item">
-                <button className="link" onClick={() => onActivate(tab.key)}>{tabLabel(state, tab)} を開く</button>
+                <button className="link" onClick={() => onActivate(tab.key)}>{t('tabs.openTab', { name: tabLabel(state, tab) })}</button>
                 <PermissionCard item={item} compact onPermission={(id, allow) => onPermission(tab.key, id, allow)} />
               </div>
             ))}

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { msg, type Text } from '../shared/i18n/index.js';
 import { parseShell, type ShellKind, type SimpleCommand } from './shellParse.js';
 
 /**
@@ -11,11 +12,11 @@ import { parseShell, type ShellKind, type SimpleCommand } from './shellParse.js'
 export interface ApprovalDecision {
   auto: boolean;
   /** Shown in the GUI, e.g. why a request still needs a manual decision. */
-  reason: string;
+  reason: Text;
 }
 
-const auto = (reason: string): ApprovalDecision => ({ auto: true, reason });
-export const manual = (reason: string): ApprovalDecision => ({ auto: false, reason });
+const auto = (reason: Text): ApprovalDecision => ({ auto: true, reason });
+export const manual = (reason: Text): ApprovalDecision => ({ auto: false, reason });
 
 const NO_HOST_EFFECT_TOOLS = new Set([
   'WebFetch', 'WebSearch', 'Agent', 'Task', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
@@ -35,29 +36,29 @@ export function shellKindOf(toolName: string): ShellKind | undefined {
 }
 
 export function classifyPermission(toolName: string, input: any, cwd: string): ApprovalDecision {
-  if (NO_HOST_EFFECT_TOOLS.has(toolName)) return auto('ホストに影響しないツール');
-  if (toolName === 'ExitPlanMode') return manual('計画の承認はユーザーの判断');
-  if (toolName === 'AskUserQuestion') return manual('ユーザーへの質問');
-  if (toolName.startsWith('mcp__')) return manual('MCP ツール（外部への影響を判定できない）');
+  if (NO_HOST_EFFECT_TOOLS.has(toolName)) return auto(msg('approve.noHostEffect'));
+  if (toolName === 'ExitPlanMode') return manual(msg('approve.planApproval'));
+  if (toolName === 'AskUserQuestion') return manual(msg('approve.question'));
+  if (toolName.startsWith('mcp__')) return manual(msg('approve.mcp'));
 
   if (READ_TOOLS.has(toolName)) {
     const p = String(input?.file_path ?? input?.path ?? input?.notebook_path ?? '');
-    return SENSITIVE_PATH.test(p) ? manual('認証情報・秘密鍵などの読み取り') : auto('読み取りのみ');
+    return SENSITIVE_PATH.test(p) ? manual(msg('approve.readSensitive')) : auto(msg('approve.readOnly'));
   }
 
   if (EDIT_TOOLS.has(toolName)) {
     const p = String(input?.file_path ?? input?.notebook_path ?? '');
-    if (!p) return manual('対象ファイルが不明');
-    if (!insideCwd(p, cwd)) return manual('作業フォルダ外への書き込み');
-    if (PROTECTED_IN_PROJECT.test(p)) return manual('.git または Claude Code 設定ファイルの変更');
-    if (SENSITIVE_PATH.test(p)) return manual('認証情報ファイルの変更');
-    return auto('作業フォルダ内のファイル編集');
+    if (!p) return manual(msg('approve.noTarget'));
+    if (!insideCwd(p, cwd)) return manual(msg('approve.writeOutside'));
+    if (PROTECTED_IN_PROJECT.test(p)) return manual(msg('approve.protected'));
+    if (SENSITIVE_PATH.test(p)) return manual(msg('approve.editCredentials'));
+    return auto(msg('approve.editInside'));
   }
 
   const shell = shellKindOf(toolName);
   if (shell) return classifyCommand(String(input?.command ?? ''), cwd, shell);
 
-  return manual(`未分類のツール（${toolName}）`);
+  return manual(msg('approve.unknownTool', { tool: toolName }));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -97,53 +98,53 @@ const DELETE_PROGRAMS = new Set(['rm', 'del', 'erase', 'rmdir', 'rd', 'remove-it
 const NULL_DEVICE = /^(\/dev\/null|\$null|nul)$/i;
 
 export function classifyCommand(command: string, cwd: string, shell: ShellKind): ApprovalDecision {
-  if (!command.trim()) return manual('コマンドが空');
+  if (!command.trim()) return manual(msg('approve.emptyCommand'));
   const parsed = parseShell(command, shell);
-  if (!parsed) return manual('コマンドを解析できない（引用符などが閉じていない）');
-  if (/\$\(|`|<\(/.test(parsed.expandable)) return manual('コマンド置換（中身を判定できない）');
+  if (!parsed) return manual(msg('approve.unparsable'));
+  if (/\$\(|`|<\(/.test(parsed.expandable)) return manual(msg('approve.substitution'));
 
   for (const cmd of parsed.commands) {
     const decision = classifySimpleCommand(cmd, cwd);
     if (!decision.auto) return decision;
   }
-  return auto('作業フォルダ内で完結するコマンド');
+  return auto(msg('approve.commandInside'));
 }
 
 function classifySimpleCommand({ words, redirects }: SimpleCommand, cwd: string): ApprovalDecision {
   for (const target of redirects) {
-    if (!NULL_DEVICE.test(target) && !insideCwd(target, cwd)) return manual('作業フォルダ外へのリダイレクト');
+    if (!NULL_DEVICE.test(target) && !insideCwd(target, cwd)) return manual(msg('approve.redirectOutside'));
   }
   const [rawProgram, ...args] = words;
-  if (!rawProgram) return auto('リダイレクトのみ');
-  if (/^[A-Za-z_]\w*=/.test(rawProgram)) return manual('環境変数付きの実行');
+  if (!rawProgram) return auto(msg('approve.redirectOnly'));
+  if (/^[A-Za-z_]\w*=/.test(rawProgram)) return manual(msg('approve.envAssignment'));
   const program = rawProgram.toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
   const sub = args.find((a) => !a.startsWith('-'))?.toLowerCase();
 
-  if (READ_ONLY_PROGRAMS.has(program)) return auto('読み取り');
+  if (READ_ONLY_PROGRAMS.has(program)) return auto(msg('approve.read'));
   if (program === 'find') {
-    return args.some((a) => /^-(delete|exec|execdir|ok|okdir|fprint)/.test(a)) ? manual('find による削除・実行') : auto('読み取り');
+    return args.some((a) => /^-(delete|exec|execdir|ok|okdir|fprint)/.test(a)) ? manual(msg('approve.findDelete')) : auto(msg('approve.read'));
   }
   if (PATH_CHECKED_PROGRAMS.has(program)) {
-    return pathArgs(args).every((a) => insideCwd(a, cwd)) ? auto('作業フォルダ内') : manual('作業フォルダ外のパスを操作');
+    return pathArgs(args).every((a) => insideCwd(a, cwd)) ? auto(msg('approve.inside')) : manual(msg('approve.outsidePaths'));
   }
   if (program === 'git') return classifyGit(args, cwd);
   if (PKG_MANAGERS.has(program)) {
     if (args.some((a) => GLOBAL_FLAG.test(a)) || args.join(' ').toLowerCase().includes('--location global')) {
-      return manual('グローバルへのインストール・設定');
+      return manual(msg('approve.global'));
     }
     return sub && PKG_SAFE.has(sub) ? auto(`${program} ${sub}`) : manual(`${program} ${sub ?? ''}`.trim());
   }
   if (program === 'npx' || program === 'bunx' || (program === 'pnpm' && sub === 'dlx')) {
     const tool = args.find((a) => !a.startsWith('-') && a !== 'dlx');
-    return tool && DEV_TOOLS.has(tool.toLowerCase()) ? auto(`${program} ${tool}`) : manual('npx で任意のパッケージを実行');
+    return tool && DEV_TOOLS.has(tool.toLowerCase()) ? auto(`${program} ${tool}`) : manual(msg('approve.npxAny'));
   }
   if (DEV_TOOLS.has(program)) return auto(program);
   if (RUNTIMES.has(program)) return classifyRuntime(program, args, cwd);
   if (BUILD_TOOLS[program]) {
     return sub && BUILD_TOOLS[program].has(sub) ? auto(`${program} ${sub}`) : manual(`${program} ${sub ?? ''}`.trim());
   }
-  if (DELETE_PROGRAMS.has(program)) return manual('削除（元に戻せない）');
-  return manual(`判定対象外のコマンド（${rawProgram}）`);
+  if (DELETE_PROGRAMS.has(program)) return manual(msg('approve.delete'));
+  return manual(msg('approve.unknownCommand', { program: rawProgram }));
 }
 
 /** `git -c key=value`: only settings that can't run code or redirect data. */
@@ -155,10 +156,10 @@ function classifyGit(allArgs: string[], cwd: string): ApprovalDecision {
   for (; i < allArgs.length; i++) {
     const a = allArgs[i];
     if (a === '-c') {
-      if (!GIT_SAFE_CONFIG.test(allArgs[i + 1] ?? '')) return manual(`git -c ${allArgs[i + 1] ?? ''}（任意コマンドを実行できる設定の可能性）`);
+      if (!GIT_SAFE_CONFIG.test(allArgs[i + 1] ?? '')) return manual(msg('approve.gitConfig', { value: allArgs[i + 1] ?? '' }));
       i++;
     } else if (a === '-C') {
-      if (!insideCwd(allArgs[i + 1] ?? '', cwd)) return manual('作業フォルダ外のリポジトリへの git 操作');
+      if (!insideCwd(allArgs[i + 1] ?? '', cwd)) return manual(msg('approve.gitOtherRepo'));
       i++;
     } else if (/^--(git-dir|work-tree|exec-path|namespace)/.test(a)) {
       return manual(`git ${a}`);
@@ -172,24 +173,24 @@ function classifyGit(allArgs: string[], cwd: string): ApprovalDecision {
   if (sub === 'init') {
     // `git init [dir]`: the new repository must be inside the working folder.
     const rest = args.slice(args.indexOf('init') + 1);
-    if (rest.some((a) => /^--(separate-git-dir|template)/.test(a))) return manual('git init の特殊オプション');
+    if (rest.some((a) => /^--(separate-git-dir|template)/.test(a))) return manual(msg('approve.gitInitOptions'));
     const dirs = rest.filter((a, i) => !a.startsWith('-') && !/^(-b|--initial-branch)$/.test(rest[i - 1] ?? ''));
-    return dirs.every((d) => insideCwd(d, cwd)) ? auto('git init') : manual('作業フォルダ外での git init');
+    return dirs.every((d) => insideCwd(d, cwd)) ? auto('git init') : manual(msg('approve.gitInitOutside'));
   }
-  if (sub === 'branch') return args.some((a) => /^-(d|D|m|M|-delete|-move)$/.test(a)) ? manual('ブランチの削除・名前変更') : auto('git branch');
-  if (sub === 'stash') return ['list', 'show'].includes(args[1] ?? '') ? auto('git stash の参照') : manual('git stash の変更');
-  if (sub === 'remote') return args.length === 1 || args[1] === '-v' ? auto('git remote の参照') : manual('git remote の変更');
-  return GIT_SAFE.has(sub) ? auto(`git ${sub}`) : manual(`git ${sub}（リモート送信・履歴の書き換え・変更の破棄の可能性）`);
+  if (sub === 'branch') return args.some((a) => /^-(d|D|m|M|-delete|-move)$/.test(a)) ? manual(msg('approve.gitBranchChange')) : auto('git branch');
+  if (sub === 'stash') return ['list', 'show'].includes(args[1] ?? '') ? auto(msg('approve.gitStashRead')) : manual(msg('approve.gitStashChange'));
+  if (sub === 'remote') return args.length === 1 || args[1] === '-v' ? auto(msg('approve.gitRemoteRead')) : manual(msg('approve.gitRemoteChange'));
+  return GIT_SAFE.has(sub) ? auto(`git ${sub}`) : manual(msg('approve.gitRisky', { sub }));
 }
 
 /** `node script.js` / `python -m pytest`: running the project's own files is fine, inline code is not. */
 function classifyRuntime(program: string, args: string[], cwd: string): ApprovalDecision {
-  if (args.some((a) => /^(-e|-c|-p|--eval|--print|--command)$/.test(a))) return manual(`${program} でのコード直接実行`);
+  if (args.some((a) => /^(-e|-c|-p|--eval|--print|--command)$/.test(a))) return manual(msg('approve.inlineCode', { program }));
   const m = args.indexOf('-m');
   if (m >= 0) return PY_MODULES.has(args[m + 1] ?? '') ? auto(`${program} -m ${args[m + 1]}`) : manual(`${program} -m ${args[m + 1] ?? ''}`);
   const script = args.find((a) => !a.startsWith('-'));
-  if (!script) return manual(`${program}（対話モード）`);
-  return insideCwd(script, cwd) ? auto(`${program} で作業フォルダ内のスクリプトを実行`) : manual('作業フォルダ外のスクリプト');
+  if (!script) return manual(msg('approve.interactive', { program }));
+  return insideCwd(script, cwd) ? auto(msg('approve.scriptInside', { program })) : manual(msg('approve.scriptOutside'));
 }
 
 /** Non-flag arguments; PowerShell `-Name value` pairs are treated as paths too, which only errs towards manual. */

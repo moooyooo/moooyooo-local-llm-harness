@@ -1,3 +1,4 @@
+import { msg, type Msg, type Text } from '../shared/i18n/index.js';
 import { execFile } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
@@ -25,20 +26,20 @@ const MAX_PUSH_DIFF_BYTES = 20 * 1024 * 1024;
 interface PathRule {
   re: RegExp;
   severity: SecurityFinding['severity'];
-  rule: string;
+  rule: Msg;
 }
 
 const SENSITIVE_FILES: PathRule[] = [
-  { re: /(^|\/)\.env(\.(?!example$|sample$|template$|dist$|defaults$)[^/]+)?$/i, severity: 'high', rule: '.env ファイル（秘密情報を含むことが多い）' },
-  { re: /\.(pem|key|p12|pfx|jks|keystore|ppk)$/i, severity: 'high', rule: '秘密鍵・証明書ファイル' },
-  { re: /(^|\/)id_(rsa|dsa|ecdsa|ed25519)$/i, severity: 'high', rule: 'SSH 秘密鍵' },
-  { re: /(^|\/)\.(netrc|pgpass|git-credentials)$/i, severity: 'high', rule: '認証情報を含む設定ファイル' },
-  { re: /(^|\/)(credentials|secrets?)(\.[a-z]+)?$|service[-_]?account[^/]*\.json$/i, severity: 'high', rule: '認証情報ファイル' },
-  { re: /\.tfstate(\.backup)?$/i, severity: 'high', rule: 'Terraform state（秘密情報を含む）' },
-  { re: /\.(log)$/i, severity: 'warn', rule: 'ログファイル（.gitignore 推奨）' },
-  { re: /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i, severity: 'warn', rule: 'OS が作るファイル（.gitignore 推奨）' },
-  { re: /\.(suo|user|pyc|pyo|class|o|obj)$/i, severity: 'warn', rule: 'ビルド・IDE の生成物（.gitignore 推奨）' },
-  { re: /\.(sqlite3?|db|mdf|ldf)$/i, severity: 'warn', rule: 'データベースファイル（個人データを含む可能性）' },
+  { re: /(^|\/)\.env(\.(?!example$|sample$|template$|dist$|defaults$)[^/]+)?$/i, severity: 'high', rule: msg('secret.envFile') },
+  { re: /\.(pem|key|p12|pfx|jks|keystore|ppk)$/i, severity: 'high', rule: msg('secret.keyFile') },
+  { re: /(^|\/)id_(rsa|dsa|ecdsa|ed25519)$/i, severity: 'high', rule: msg('secret.sshKey') },
+  { re: /(^|\/)\.(netrc|pgpass|git-credentials)$/i, severity: 'high', rule: msg('secret.credentialConfig') },
+  { re: /(^|\/)(credentials|secrets?)(\.[a-z]+)?$|service[-_]?account[^/]*\.json$/i, severity: 'high', rule: msg('secret.credentialFile') },
+  { re: /\.tfstate(\.backup)?$/i, severity: 'high', rule: msg('secret.tfstate') },
+  { re: /\.(log)$/i, severity: 'warn', rule: msg('secret.logFile') },
+  { re: /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i, severity: 'warn', rule: msg('secret.osFile') },
+  { re: /\.(suo|user|pyc|pyo|class|o|obj)$/i, severity: 'warn', rule: msg('secret.buildArtifact') },
+  { re: /\.(sqlite3?|db|mdf|ldf)$/i, severity: 'warn', rule: msg('secret.database') },
 ];
 
 /** Generated / dependency directories: reported once per directory instead of per file. */
@@ -53,22 +54,22 @@ const DOTNET_PROJECT = /\.(cs|vb|fs)proj$|\.sln$/i;
 interface ContentRule {
   re: RegExp;
   severity: SecurityFinding['severity'];
-  rule: string;
+  rule: Msg;
 }
 
 const CONTENT_RULES: ContentRule[] = [
-  { re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY( BLOCK)?-----/, severity: 'high', rule: '秘密鍵' },
-  { re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/, severity: 'high', rule: 'AWS アクセスキー' },
-  { re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{50,}/, severity: 'high', rule: 'GitHub トークン' },
-  { re: /\bsk-ant-[A-Za-z0-9_-]{20,}/, severity: 'high', rule: 'Anthropic API キー' },
-  { re: /\bsk-(?!ant-)(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}/, severity: 'high', rule: 'OpenAI 形式の API キー' },
-  { re: /\bAIza[0-9A-Za-z_-]{35}\b/, severity: 'high', rule: 'Google API キー' },
-  { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/, severity: 'high', rule: 'Slack トークン' },
-  { re: /\b(?:sk|rk)_live_[A-Za-z0-9]{20,}/, severity: 'high', rule: 'Stripe 本番キー' },
-  { re: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/, severity: 'high', rule: 'SendGrid API キー' },
-  { re: /AccountKey=[A-Za-z0-9+/=]{40,}/, severity: 'high', rule: 'Azure ストレージキー' },
-  { re: /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqps?|mssql|sqlserver):\/\/[^\s:/@"']+:[^\s@/"']+@/i, severity: 'high', rule: 'パスワード付きの接続文字列' },
-  { re: /\/\/[^\s]*:_authToken=(?!\$\{)[^\s]+/, severity: 'high', rule: 'npm 認証トークン' },
+  { re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY( BLOCK)?-----/, severity: 'high', rule: msg('secret.privateKey') },
+  { re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/, severity: 'high', rule: msg('secret.aws') },
+  { re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{50,}/, severity: 'high', rule: msg('secret.github') },
+  { re: /\bsk-ant-[A-Za-z0-9_-]{20,}/, severity: 'high', rule: msg('secret.anthropic') },
+  { re: /\bsk-(?!ant-)(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}/, severity: 'high', rule: msg('secret.openai') },
+  { re: /\bAIza[0-9A-Za-z_-]{35}\b/, severity: 'high', rule: msg('secret.google') },
+  { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/, severity: 'high', rule: msg('secret.slack') },
+  { re: /\b(?:sk|rk)_live_[A-Za-z0-9]{20,}/, severity: 'high', rule: msg('secret.stripe') },
+  { re: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/, severity: 'high', rule: msg('secret.sendgrid') },
+  { re: /AccountKey=[A-Za-z0-9+/=]{40,}/, severity: 'high', rule: msg('secret.azure') },
+  { re: /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqps?|mssql|sqlserver):\/\/[^\s:/@"']+:[^\s@/"']+@/i, severity: 'high', rule: msg('secret.connectionString') },
+  { re: /\/\/[^\s]*:_authToken=(?!\$\{)[^\s]+/, severity: 'high', rule: msg('secret.npmToken') },
 ];
 
 /** `password = "<literal>"`: only quoted literals of 8+ chars, and not obvious placeholders. */
@@ -76,10 +77,10 @@ const ASSIGNMENT = /\b(password|passwd|pwd|secret|api[_-]?key|apikey|access[_-]?
 const PLACEHOLDER = /^(x+|\*+|\.+|<.*>|\$\{.*\}|\{\{.*\}\}|%.*%|changeme|change_me|your[_-]?|example|dummy|sample|placeholder|test|password|secret|null|none|undefined|todo)/i;
 
 /** The kind of secret `text` seems to contain (e.g. a web search query about to leave the machine), or undefined. */
-export function findSecret(text: string): string | undefined {
+export function findSecret(text: string): Msg | undefined {
   for (const r of CONTENT_RULES) if (r.re.test(text)) return r.rule;
   const a = ASSIGNMENT.exec(text);
-  if (a && !PLACEHOLDER.test(a[2])) return `${a[1]} の値`;
+  if (a && !PLACEHOLDER.test(a[2])) return msg('secret.assignment', { name: a[1] });
   return undefined;
 }
 
@@ -90,19 +91,19 @@ export async function scanBeforeGit(ops: GitOp[], cwd: string): Promise<Security
   try {
     const top = await gitTop(cwd);
     if (!top) {
-      scan.scope = 'git 管理前のフォルダ全体（git init / add で記録されうるファイル）';
+      scan.scope = msg('secret.scopeInit');
       await scan.walk(cwd, cwd, await readGitignore(cwd));
     } else {
-      const scopes: string[] = [];
+      const scopes: Msg[] = [];
       if (ops.some((o) => o !== 'push')) {
-        scopes.push('コミット対象になりうる変更・未追跡ファイル');
+        scopes.push(msg('secret.scopeCommit'));
         await scan.workingTree(top);
       }
       if (ops.includes('push')) {
-        scopes.push('push で送信されるコミット');
+        scopes.push(msg('secret.scopePush'));
         await scan.unpushed(top);
       }
-      scan.scope = scopes.join(' / ');
+      scan.scope = scopes.length === 2 ? msg('secret.scopeJoin', { a: scopes[0], b: scopes[1] }) : scopes[0];
     }
   } catch (err) {
     scan.error = String(err instanceof Error ? err.message : err);
@@ -137,7 +138,7 @@ async function readGitignore(dir: string): Promise<string[]> {
 }
 
 class Scan {
-  scope = '';
+  scope: Text = '';
   error?: string;
   private findings: SecurityFinding[] = [];
   private seen = new Set<string>();
@@ -170,7 +171,7 @@ class Scan {
 
   result(): SecurityScan {
     for (const [dir, count] of this.ignoredDirs) {
-      this.add({ path: `${dir}/`, severity: 'warn', rule: '依存関係・生成物のフォルダ（.gitignore 推奨）', detail: count ? `${count} ファイル` : undefined });
+      this.add({ path: `${dir}/`, severity: 'warn', rule: msg('secret.dependencyFolder'), detail: count ? msg('secret.fileCount', { count }) : undefined });
     }
     const order = { high: 0, warn: 1 };
     this.findings.sort((a, b) => order[a.severity] - order[b.severity]);
@@ -179,7 +180,7 @@ class Scan {
 
   private add(f: SecurityFinding) {
     // The same file can appear in several unpushed commits.
-    const key = `${f.path}\0${f.rule}\0${f.detail ?? ''}`;
+    const key = JSON.stringify([f.path, f.rule, f.detail]);
     if (this.seen.has(key)) return;
     if (this.findings.length >= MAX_FINDINGS) {
       this.truncated = true;
@@ -218,7 +219,7 @@ class Scan {
     } catch {
       return; // deleted or unreadable
     }
-    if (size > LARGE_FILE_BYTES) this.add({ path: rel, severity: 'warn', rule: '大きなファイル（5MB 超）', detail: `${(size / 1024 / 1024).toFixed(1)} MB` });
+    if (size > LARGE_FILE_BYTES) this.add({ path: rel, severity: 'warn', rule: msg('secret.largeFile'), detail: `${(size / 1024 / 1024).toFixed(1)} MB` });
     if (size > MAX_CONTENT_BYTES) return;
     const buf = await readFile(path.join(root, rel));
     if (buf.subarray(0, 8000).includes(0)) return; // binary
@@ -239,7 +240,7 @@ class Scan {
       }
       const a = ASSIGNMENT.exec(line);
       if (a && !PLACEHOLDER.test(a[2])) {
-        this.add({ path: rel, severity: 'warn', rule: `パスワード・キーらしき値（${a[1]}）`, detail: redact(a[2]), line: lineNumbers ? i + 1 : undefined });
+        this.add({ path: rel, severity: 'warn', rule: msg('secret.passwordLike', { name: a[1] }), detail: redact(a[2]), line: lineNumbers ? i + 1 : undefined });
         hits++;
       }
     }
@@ -329,7 +330,7 @@ class Scan {
   }
 }
 
-function redact(s: string): string {
+function redact(s: string): Text {
   const t = s.trim();
-  return t.length <= 6 ? '***' : `${t.slice(0, 4)}…（${t.length}文字）`;
+  return t.length <= 6 ? '***' : msg('secret.redacted', { head: t.slice(0, 4), length: t.length });
 }

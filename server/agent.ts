@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { msg, TextError, type Text } from '../shared/i18n/index.js';
 import type { AgentEvent, PermissionMode, ThinkSetting, ToolCall, TurnStats } from '../shared/protocol.js';
 import {
   cleanSummary,
@@ -132,7 +133,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     try {
       for (;;) {
         if (turns >= MAX_TURNS) {
-          result = this.result('max_turns', started, turns, stats, `ツール呼び出しが ${MAX_TURNS} 回に達したため停止しました`);
+          result = this.result('max_turns', started, turns, stats, msg('agent.maxTurns', { max: MAX_TURNS }));
           break;
         }
         turns++;
@@ -168,10 +169,10 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
           // Ollama drops a tool call cut off midway, so ask once for smaller steps instead of stopping.
           if (cutOff && !cutOffRetried) {
             cutOffRetried = true;
-            this.push({ role: 'user', content: CUT_OFF }, { notice: '出力が長すぎて途中で切れたため、小さく分けて続けるよう自動で依頼しました' });
+            this.push({ role: 'user', content: CUT_OFF }, { notice: msg('agent.cutOffRetry') });
             continue;
           }
-          result = this.result('success', started, turns, stats, cutOff ? '出力が長すぎて、もう一度途中で切れたため停止しました' : undefined);
+          result = this.result('success', started, turns, stats, cutOff ? msg('agent.cutOffStopped') : undefined);
           break;
         }
         cutOffRetried = false;
@@ -215,7 +216,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     try {
       await this.compact(false, ctrl.signal, await this.contextLimit());
     } catch (err) {
-      this.send({ type: 'compact', phase: 'failed', auto: false, message: ctrl.signal.aborted ? '中断しました' : describeError(err) });
+      this.send({ type: 'compact', phase: 'failed', auto: false, message: ctrl.signal.aborted ? msg('agent.compactInterrupted') : describeError(err) });
     } finally {
       this.abort = undefined;
     }
@@ -288,11 +289,11 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     const loaded = await this.deps.contextLength?.(model).catch(() => undefined);
     const key = `${model}@${numCtx}`;
     if (!loaded || loaded >= numCtx || this.reloadedFor === key) return;
-    this.send({ type: 'notice', text: `Ollama が ${model} を ${formatK(loaded)} で読み込んでいたため、${formatK(numCtx)} で読み込み直します` });
+    this.send({ type: 'notice', text: msg('agent.reloading', { model, from: formatK(loaded), to: formatK(numCtx) }) });
     if (await this.deps.unload(model, signal)) {
       this.reloadedFor = key;
     } else if (!signal.aborted) {
-      this.send({ type: 'notice', text: `ほかの処理が終わらないため、今回は ${formatK(loaded)} のまま続けます` });
+      this.send({ type: 'notice', text: msg('agent.reloadSkipped', { ctx: formatK(loaded) }) });
     }
   }
 
@@ -310,7 +311,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     const overhead = requestTokens(this.systemPrompt, this.toolDefs(), []);
     const cut = splitPoint(this.messages, keepBudget(limit ?? Infinity, overhead, messagesTokens(this.messages), !auto));
     if (cut === 0) {
-      if (!auto) this.send({ type: 'compact', phase: 'failed', auto, message: '要約できるほどの会話がまだありません' });
+      if (!auto) this.send({ type: 'compact', phase: 'failed', auto, message: msg('agent.compactNothing') });
       return;
     }
     this.send({ type: 'compact', phase: 'start', auto });
@@ -349,7 +350,7 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
 
   private async summarize(req: ChatRequest, signal: AbortSignal): Promise<string> {
     const summary = cleanSummary((await this.deps.chat(req, signal, {})).content);
-    if (!summary) throw new Error('モデルが要約を返しませんでした');
+    if (!summary) throw new TextError(msg('agent.compactEmpty'));
     return summary;
   }
 
@@ -453,14 +454,14 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     started: number,
     numTurns: number,
     stats: TurnStats | undefined,
-    message?: string,
+    message?: Text,
   ): Extract<AgentEvent, { type: 'result' }> {
     const isError = subtype === 'error' || subtype === 'max_turns';
     return { type: 'result', isError, subtype, message, durationMs: Date.now() - started, numTurns, stats };
   }
 
   /** `notice`: the harness wrote this message itself; the GUI shows the notice instead of the message. */
-  private push(message: OllamaMessage, opts: { isError?: boolean; notice?: string } = {}) {
+  private push(message: OllamaMessage, opts: { isError?: boolean; notice?: Text } = {}) {
     const { isError, notice } = opts;
     this.messages.push(message);
     this.persist({ type: 'message', message, ...(isError && { isError }), ...(notice && { notice }), timestamp: new Date().toISOString() });

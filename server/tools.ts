@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { glob, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { DEFAULT_LOCALE, textOf } from '../shared/i18n/index.js';
 import type { OllamaTool } from './ollama.js';
 import { findSecret } from './secretScan.js';
 import { checkUrl, PAGE_CHARS, webFetch, webSearch } from './web.js';
@@ -395,7 +396,9 @@ export function isWebTool(name: string): boolean {
 /** A query or URL about to leave the machine must not carry a secret. */
 function checkOutgoing(text: string) {
   const secret = findSecret(text);
-  if (secret) throw new ToolError(`This looks like it contains a secret (${secret}), so it was not sent. Leave secrets out of queries and URLs.`);
+  if (secret) {
+    throw new ToolError(`This looks like it contains a secret (${textOf(DEFAULT_LOCALE, secret)}), so it was not sent. Leave secrets out of queries and URLs.`);
+  }
 }
 
 /** Error message if the call would fail anyway (unknown tool, bad input, Edit without Read, ...), so the user isn't asked first. */

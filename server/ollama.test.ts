@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, test } from 'node:test';
+import { textOf } from '../shared/i18n/index.js';
 import type { ChatRequest } from './ollama.js';
 
 // A fake Ollama. OLLAMA_HOST is read when ollama.ts loads, so import it after the server is listening.
@@ -85,11 +86,11 @@ test('a connection dropped by Ollama is reported as such', async () => {
     () => assert.fail('should have failed'),
     (e: unknown) => e,
   );
-  assert.match(describeError(err), /接続が切れました/);
+  assert.match(textOf('ja', describeError(err)), /接続が切れました/);
 });
 
 test('describeError reads the error code from node:http and fetch errors', () => {
   const refused = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
-  assert.match(describeError(refused), /接続できません/);
-  assert.match(describeError(new TypeError('fetch failed', { cause: refused })), /接続できません/);
+  assert.match(textOf('ja', describeError(refused)), /接続できません/);
+  assert.match(textOf('ja', describeError(new TypeError('fetch failed', { cause: refused }))), /接続できません/);
 });
