@@ -87,9 +87,9 @@ test('Glob, Grep and LS', async () => {
   const g = await runTool('Glob', { pattern: '**/*.ts' }, ctx);
   assert.equal(g.output, path.join('src', 'a.ts'));
   const files = await runTool('Grep', { pattern: 'needle' }, ctx);
-  assert.equal(files.output, 'src/a.ts');
+  assert.equal(files.output, path.join('src', 'a.ts'));
   const content = await runTool('Grep', { pattern: 'NEEDLE', '-i': true, output_mode: 'content', path: 'src' }, ctx);
-  assert.match(content.output, /src\/a\.ts:1:export const needle/);
+  assert.ok(content.output.includes(`${path.join('src', 'a.ts')}:1:export const needle`), content.output);
   assert.equal((await runTool('Grep', { pattern: 'zzz' }, ctx)).output, 'No matches found');
   const ls = await runTool('LS', {}, ctx);
   assert.match(ls.output, /node_modules\/\nsrc\//);

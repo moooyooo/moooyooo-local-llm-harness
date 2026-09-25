@@ -9,6 +9,7 @@ import { textOf, type Text } from '../shared/i18n/index.js';
 import { SUMMARY_HEADER, SUMMARY_PROMPT } from './compact.js';
 import type { ChatFn, ChatRequest, ChatResult, OllamaMessage, OllamaToolCall } from './ollama.js';
 import { SessionStore, toEvents, toMessages } from './store.js';
+import { SHELL_TOOL } from './tools.js';
 
 const roots: string[] = [];
 after(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
@@ -108,7 +109,7 @@ test('plain answer: streams, commits the message and reports stats', async () =>
   assert.equal(result.stats?.tokensPerSec, 10);
   assert.equal(requests[0].messages[0].role, 'system');
   assert.deepEqual(requests[0].messages[1], { role: 'user', content: 'hi' });
-  assert.ok(requests[0].tools?.some((t) => t.function.name === 'Bash'));
+  assert.ok(requests[0].tools?.some((t) => t.function.name === SHELL_TOOL));
 });
 
 test('read inside the working folder runs without a prompt, and its result goes back to the model', async () => {
@@ -141,7 +142,7 @@ test('write asks for permission; allowing runs it', async () => {
 
 test('denying returns an error result to the model and does not run the tool', async () => {
   const cwd = tmp();
-  const { chat, requests } = scripted(reply('', [call('call_1', 'Bash', { command: 'touch x' })]), reply('ok'));
+  const { chat, requests } = scripted(reply('', [call('call_1', SHELL_TOOL, { command: 'touch x' })]), reply('ok'));
   const { s, events, answerWith } = session(chat, { cwd });
   answerWith((sess, ev) => sess.respondPermission(ev.id, false));
   await s.sendUser('go');
@@ -153,7 +154,7 @@ test('denying returns an error result to the model and does not run the tool', a
 
 test('auto-approval answers qualifying prompts itself', async () => {
   const cwd = tmp();
-  const { chat } = scripted(reply('', [call('call_1', 'Bash', { command: 'mkdir sub' })]), reply('ok'));
+  const { chat } = scripted(reply('', [call('call_1', SHELL_TOOL, { command: 'mkdir sub' })]), reply('ok'));
   const { s, events } = session(chat, { cwd, auto: true });
   await s.sendUser('go');
   const perm = last(events, 'permission')!;
@@ -175,7 +176,7 @@ test('a call that would fail anyway is not shown to the user as a prompt', async
 test('acceptEdits writes inside the folder silently, but still asks for shell commands', async () => {
   const cwd = tmp();
   const { chat } = scripted(
-    reply('', [call('call_1', 'Write', { file_path: 'a.txt', content: 'x' }), call('call_2', 'Bash', { command: 'ls' })]),
+    reply('', [call('call_1', 'Write', { file_path: 'a.txt', content: 'x' }), call('call_2', SHELL_TOOL, { command: 'ls' })]),
     reply('ok'),
   );
   const { s, events, answerWith } = session(chat, { cwd, mode: 'acceptEdits' });
@@ -183,7 +184,7 @@ test('acceptEdits writes inside the folder silently, but still asks for shell co
   await s.sendUser('go');
   const perms = events.filter((e) => e.type === 'permission');
   assert.equal(perms.length, 1);
-  assert.equal(perms[0].type === 'permission' && perms[0].toolName, 'Bash');
+  assert.equal(perms[0].type === 'permission' && perms[0].toolName, SHELL_TOOL);
 });
 
 test('plan mode offers only read-only tools and refuses others', async () => {
@@ -198,7 +199,7 @@ test('plan mode offers only read-only tools and refuses others', async () => {
 
 test('bypass mode still asks before git commit', async () => {
   const cwd = tmp();
-  const { chat } = scripted(reply('', [call('call_1', 'Bash', { command: 'git add -A && git commit -m x' })]), reply('ok'));
+  const { chat } = scripted(reply('', [call('call_1', SHELL_TOOL, { command: 'git add -A && git commit -m x' })]), reply('ok'));
   const { s, events, answerWith } = session(chat, { cwd, mode: 'bypassPermissions' });
   answerWith((sess, ev) => sess.respondPermission(ev.id, false));
   await s.sendUser('commit');
@@ -209,7 +210,7 @@ test('bypass mode still asks before git commit', async () => {
 test('interrupt while waiting for permission cancels the prompt and closes the tool call', async () => {
   const cwd = tmp();
   const { chat, requests } = scripted(
-    reply('', [call('call_1', 'Bash', { command: 'touch a' }), call('call_2', 'Bash', { command: 'touch b' })]),
+    reply('', [call('call_1', SHELL_TOOL, { command: 'touch a' }), call('call_2', SHELL_TOOL, { command: 'touch b' })]),
     reply('after'),
   );
   const { s, events, answerWith } = session(chat, { cwd });
