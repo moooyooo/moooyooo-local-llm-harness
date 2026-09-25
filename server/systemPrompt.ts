@@ -12,7 +12,7 @@ const MAX_INSTRUCTIONS_CHARS = 16_000;
 export function buildSystemPrompt(opts: { cwd: string; permissionMode: PermissionMode; tools: boolean; web?: boolean }): string {
   const { cwd, permissionMode, tools, web } = opts;
   const parts = [
-    'You are a coding agent running in "Local Harness", a GUI on the user\'s own computer. ' +
+    'You are a coding agent running in "Local LLM Harness", a GUI on the user\'s own computer. ' +
       'You help the user with software engineering tasks in their working folder' + (tools ? ' by using the provided tools.' : '.'),
     section('Environment', [
       `Working folder: ${cwd}`,

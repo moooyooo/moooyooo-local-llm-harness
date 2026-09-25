@@ -32,7 +32,7 @@ const PERMISSION_MODES: { value: PermissionMode; label: string }[] = [
   { value: 'bypassPermissions', label: 'bypassPermissions（確認なし）' },
 ];
 const SETTINGS_KEY = 'custom-harnes-local.settings';
-const APP_TITLE = 'Local Harness';
+const APP_TITLE = 'Local LLM Harness';
 const LOCKED_TITLE = '応答中は変更できません。終わってから変更すると、次のメッセージから適用されます';
 
 interface Settings {

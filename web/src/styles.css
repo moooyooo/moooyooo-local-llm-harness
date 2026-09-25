@@ -1,17 +1,22 @@
+/*
+ * Greens from a deep forest green to white, throughout (the other custom harnesses use warm beige neutrals), so this
+ * one is easy to tell apart side by side. Text colors keep at least 4.5:1 contrast on their backgrounds.
+ */
 :root {
-  --bg: #f7f6f3;
+  --bg: #f6faf7;
   --panel: #ffffff;
-  --text: #1f1e1c;
-  --muted: #74716b;
-  --border: #e3e0d9;
-  /* Teal (the original custom-harnes is terracotta), so the two are easy to tell apart side by side. */
-  --accent: #1f7a6d;
+  --sidebar: #e8f2eb;
+  --text: #15261c;
+  --muted: #56695e;
+  --border: #d3e2d8;
+  --accent: #1d6b43;
+  --accent-strong: #14532d;
   --accent-text: #ffffff;
-  --add-bg: #e6f4ea;
+  --add-bg: #dcefe2;
   --del-bg: #fbe9e7;
-  --user-bg: #ece9e2;
-  --code-bg: #f1efea;
-  --ok: #2f7d4f;
+  --user-bg: #dcede2;
+  --code-bg: #ecf4ee;
+  --ok: #22804a;
   --ng: #b3261e;
   --warn-bg: #fff6e0;
   --warn-border: #e8c46a;
@@ -20,17 +25,19 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1c1b19;
-    --panel: #262522;
-    --text: #ecebe7;
-    --muted: #9c998f;
-    --border: #3a3834;
-    --accent: #4fb3a4;
-    --accent-text: #1c1b19;
-    --add-bg: #1f3326;
+    --bg: #0e1812;
+    --panel: #14221a;
+    --sidebar: #112019;
+    --text: #e4efe7;
+    --muted: #8ea596;
+    --border: #253a2d;
+    --accent: #4caf78;
+    --accent-strong: #8fd9ae;
+    --accent-text: #0e1812;
+    --add-bg: #173522;
     --del-bg: #3a2220;
-    --user-bg: #33312d;
-    --code-bg: #2e2c29;
+    --user-bg: #1b3325;
+    --code-bg: #182a20;
     --ok: #6cc08e;
     --ng: #f2867d;
     --warn-bg: #3a3222;
@@ -68,10 +75,10 @@ input, select, textarea {
 }
 
 .sidebar {
-  background: var(--panel); border-right: 1px solid var(--border); padding: 16px;
+  background: var(--sidebar); border-right: 1px solid var(--border); padding: 16px;
   display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
 }
-.sidebar h1 { font-size: 18px; margin: 0; }
+.sidebar h1 { font-size: 18px; margin: 0; color: var(--accent-strong); }
 .sidebar label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .conn { font-size: 12px; }
 .conn::before { content: "●"; margin-right: 6px; }
