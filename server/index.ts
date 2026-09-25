@@ -17,7 +17,8 @@ const HOST = '127.0.0.1';
 const DEV = process.argv.includes('--dev');
 const PORT = Number(process.env.PORT ?? (DEV ? DEV_SERVER_PORT : PROD_PORT));
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DIST = path.join(ROOT, 'dist');
+/** Built GUI to serve. scripts/harness.mjs uses dist-prod/, so a development `npm run build` never swaps production's GUI. */
+const DIST = path.resolve(ROOT, process.env.HARNESS_DIST ?? 'dist');
 const DEFAULT_CWD = process.env.HARNESS_CWD ?? process.cwd();
 /** Per connection. Sessions share the machine's memory, so keep this modest. */
 const MAX_SESSIONS = 10;
@@ -63,6 +64,8 @@ function checkImages(images: unknown): string | undefined {
 }
 
 const app = express();
+// Lets scripts/harness.mjs tell this server apart from another program on the port.
+app.get('/api/health', (_req, res) => res.json({ app: 'custom-harnes-local-llm', pid: process.pid, port: PORT, dev: DEV }));
 if (!DEV && existsSync(DIST)) {
   app.use(express.static(DIST));
   app.get('/{*path}', (_req, res) => res.sendFile(path.join(DIST, 'index.html')));

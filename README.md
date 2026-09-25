@@ -38,6 +38,24 @@ npm start          # 本番: http://localhost:38720
 2. 「開始」を押し、メッセージを送る
 3. ファイル編集やコマンド実行の前に、画面に「許可 / 拒否」が表示される（Edit は差分で表示）
 
+### 常に使えるようにする（ログイン時に本番を自動起動、Mac）
+
+| | コマンド |
+| --- | --- |
+| 自動起動を登録（その場で起動もする） | `scripts/mac/autostart.sh install` |
+| ハーネスを変更したあとに再起動（ビルドし直す） | `scripts/mac/autostart.sh restart` |
+| 状態を見る | `scripts/mac/autostart.sh status` |
+| 登録を解除（本番も停止） | `scripts/mac/autostart.sh uninstall` |
+| 起動してブラウザで開く | `scripts/mac/start-harness.sh` |
+
+- LaunchAgent（`~/Library/LaunchAgents/com.moooyooo.custom-harnes-local-llm.plist`）で、ログイン時に http://localhost:38720 を起動し、落ちても自動で再起動します。
+  初回は macOS から「バックグラウンド項目が追加されました」と通知されます。「システム設定 > 一般 > ログイン項目」でオフにすると起動しません。
+- エージェントが git・npm・docker などを使えるよう、`install` を実行したターミナルの PATH・SHELL・LANG を引き継ぎます。
+  コマンドを新しく入れたとき、フォルダを移動したとき、node を入れ直したときは `install` をやり直してください。
+- 本番は起動のたびにビルドし直し、`dist-prod/` から配信します。開発中に `npm run build` しても本番の画面は変わりません。
+- ログは `logs/harness.log` に出ます。登録中は `npm start` を使わないでください（同じポートを取り合います）。
+- Windows 用の自動起動はまだありません（custom-harnes の `scripts/windows/` を移植すれば対応できます）。
+
 ## 機能（v0.1）
 
 custom-harnes から引き継いだもの:

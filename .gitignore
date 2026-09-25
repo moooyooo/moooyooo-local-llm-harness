@@ -1,10 +1,12 @@
 # dependencies
 node_modules/
 
-# build output
+# build output (dist-prod/ is production's own build, made by scripts/harness.mjs)
 dist/
+dist-prod/
 
 # logs
+logs/
 *.log
 npm-debug.log*
 

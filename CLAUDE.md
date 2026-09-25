@@ -63,6 +63,9 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 
 - `npm run dev`: server (tsx watch --dev, :38721) + Vite (:38722, proxies /ws). Open http://localhost:38722
 - `npm run build` then `npm start`: serves `dist/` at http://localhost:38720
+- Production normally runs as a LaunchAgent (`scripts/mac/autostart.sh install|restart|status|uninstall`, ported from
+  custom-harnes): `scripts/harness.mjs run` builds into `dist-prod/` and serves that (`HARNESS_DIST`), so `npm run build`
+  never swaps the running GUI. After changing the harness, `scripts/mac/autostart.sh restart`; don't `npm start` meanwhile.
 - Ports live in `shared/ports.ts` (different from custom-harnes so both can run at once; avoid 49152+)
 - `npm run typecheck`: checks both server and web (TypeScript 7)
 - `npm run searxng [-- stop|status]`: the local SearXNG container for WebSearch (needs Docker, e.g. OrbStack)
