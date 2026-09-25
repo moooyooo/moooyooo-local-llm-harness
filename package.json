@@ -1,5 +1,5 @@
 {
-  "name": "custom-harnes-local-llm",
+  "name": "local-llm-harness",
   "version": "0.1.0",
   "private": true,
   "description": "Local web GUI coding-agent harness that runs local LLMs through Ollama",

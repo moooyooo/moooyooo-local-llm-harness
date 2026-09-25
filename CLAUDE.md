@@ -1,8 +1,10 @@
-# custom-harnes-local-llm
+# Local LLM Harness (local-llm-harness)
 
-A local web GUI coding-agent harness for local LLMs served by Ollama. The UX follows
-[custom-harnes](https://github.com/moooyooo/custom-harnes) (a GUI for the Claude Code CLI), but instead of driving a CLI,
-the server runs its own agent loop against Ollama's `/api/chat`.
+A local web GUI coding-agent harness for local LLMs served by Ollama. The UX follows custom-harnes, the author's private
+web GUI for the Claude Code CLI, but instead of driving a CLI, the server runs its own agent loop against Ollama's `/api/chat`.
+Internal names (the `~/.custom-harnes-local` data folder, the settings key in localStorage, the LaunchAgent label, the app
+name in `/api/health`) keep the old `custom-harnes-local` spelling so existing installs keep working.
+READMEs: `README.md` (English) and `README.ja.md` (Japanese); keep them in step.
 It is for personal, local use only: do not add features that expose it to other users or to the network.
 
 ## Architecture

@@ -1,135 +1,146 @@
-# custom-harnes-local-llm
+# Local LLM Harness
 
-[custom-harnes](https://github.com/moooyooo/custom-harnes)（Claude Code 用の Web GUI ハーネス）と同じ操作感で、
-**Ollama のローカル LLM** をコーディングエージェントとして動かす、ローカル専用の Web GUI ハーネスです。
+English | [日本語](README.ja.md)
 
-Claude Code CLI の代わりに、サーバー内の自前のエージェントループが Ollama の `/api/chat`（ツール呼び出し）を使い、
-ファイルの読み書きやコマンド実行を行います。通信はすべてこの PC の中で完結します。
+A local-only web GUI that runs **local LLMs served by [Ollama](https://ollama.com)** as a coding agent.
+Its UX follows the author's (private) web GUI for Claude Code.
 
-## 必要なもの
+Instead of driving a CLI, the server runs its own agent loop against Ollama's `/api/chat` (tool calling) to read and edit
+files and run commands. Everything stays on your machine, unless you turn web search on.
 
-- Node.js 22 以上（`fs.glob` を使うため）
-- [Ollama](https://ollama.com) が起動していること（既定: `http://127.0.0.1:11434`）
-- ツール呼び出しに対応したモデル（例: `qwen3-coder:30b`, `qwen3.6:35b-a3b`, `gemma4` など）
-- あると速いもの: [ripgrep](https://github.com/BurntSushi/ripgrep)（`rg`。なければ Grep は JavaScript 実装で動きます）
-- Web 検索を使う場合: Docker（[OrbStack](https://orbstack.dev) など）。検索はローカルで動かす [SearXNG](https://github.com/searxng/searxng) を使います
+- Tested on macOS (Apple silicon) with Ollama 0.32. Windows (with PowerShell as the shell) is supported by design but untested.
+- **The UI is in Japanese.** Button names are quoted below with their meaning.
 
-### Web 検索の準備（使う場合だけ）
+## Requirements
 
-```sh
-brew install --cask orbstack   # Docker 環境（初回は OrbStack を起動して初期設定する）
-npm run searxng                # SearXNG を起動（初回は設定ファイルとコンテナを作る。127.0.0.1:38730 だけで待ち受け）
-npm run searxng -- stop        # 停止（status で状態確認）
-```
+- Node.js 22 or later (uses `fs.glob`)
+- A running [Ollama](https://ollama.com) (default: `http://127.0.0.1:11434`)
+- A model that supports tool calling (e.g. `qwen3-coder:30b`, `qwen3.6:35b-a3b`, `gemma4`)
+- Optional, for speed: [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`; without it, Grep falls back to JavaScript)
+- For web search: Docker (e.g. [OrbStack](https://orbstack.dev)), to run [SearXNG](https://github.com/searxng/searxng) locally
 
-左パネルの「Web 検索（SearXNG）」を ON にすると、そのタブのモデルが WebSearch / WebFetch を使えるようになります（既定は OFF）。
-
-## 使い方
+## Usage
 
 ```sh
+git clone https://github.com/moooyooo/local-llm-harness.git
+cd local-llm-harness
 npm install
-npm run dev        # 開発: http://localhost:38722
-# または
+npm run dev        # development: http://localhost:38722
+# or
 npm run build
-npm start          # 本番: http://localhost:38720
+npm start          # production: http://localhost:38720
 ```
 
-1. 左のパネルで作業フォルダ・モデル・思考・コンテキスト長・権限モードを選ぶ
-2. 「開始」を押し、メッセージを送る
-3. ファイル編集やコマンド実行の前に、画面に「許可 / 拒否」が表示される（Edit は差分で表示）
+1. In the left panel, choose the working folder, model, thinking, context length and permission mode.
+2. Press 「開始」 (Start) and send a message.
+3. Before a file edit or a command, the GUI asks 「許可 / 拒否」 (Allow / Deny); edits are shown as diffs.
 
-### 常に使えるようにする（ログイン時に本番を自動起動、Mac）
+### Web search setup (optional)
 
-| | コマンド |
+```sh
+brew install --cask orbstack   # Docker runtime (open OrbStack once to finish its setup)
+npm run searxng                # start SearXNG (creates its settings and container the first time; listens on 127.0.0.1:38730 only)
+npm run searxng -- stop        # stop (or: status)
+```
+
+Check 「Web 検索（SearXNG）」 (web search) in the left panel to let that tab's model use WebSearch / WebFetch (off by default).
+
+### Always on: start production at login (macOS)
+
+| | Command |
 | --- | --- |
-| 自動起動を登録（その場で起動もする） | `scripts/mac/autostart.sh install` |
-| ハーネスを変更したあとに再起動（ビルドし直す） | `scripts/mac/autostart.sh restart` |
-| 状態を見る | `scripts/mac/autostart.sh status` |
-| 登録を解除（本番も停止） | `scripts/mac/autostart.sh uninstall` |
-| 起動してブラウザで開く | `scripts/mac/start-harness.sh` |
+| Register and start now | `scripts/mac/autostart.sh install` |
+| Rebuild and restart after changing the harness | `scripts/mac/autostart.sh restart` |
+| Show status | `scripts/mac/autostart.sh status` |
+| Unregister (also stops production) | `scripts/mac/autostart.sh uninstall` |
+| Start if needed and open in the browser | `scripts/mac/start-harness.sh` |
 
-- LaunchAgent（`~/Library/LaunchAgents/com.moooyooo.custom-harnes-local-llm.plist`）で、ログイン時に http://localhost:38720 を起動し、落ちても自動で再起動します。
-  初回は macOS から「バックグラウンド項目が追加されました」と通知されます。「システム設定 > 一般 > ログイン項目」でオフにすると起動しません。
-- エージェントが git・npm・docker などを使えるよう、`install` を実行したターミナルの PATH・SHELL・LANG を引き継ぎます。
-  コマンドを新しく入れたとき、フォルダを移動したとき、node を入れ直したときは `install` をやり直してください。
-- 本番は起動のたびにビルドし直し、`dist-prod/` から配信します。開発中に `npm run build` しても本番の画面は変わりません。
-- ログは `logs/harness.log` に出ます。登録中は `npm start` を使わないでください（同じポートを取り合います）。
-- Windows 用の自動起動はまだありません（custom-harnes の `scripts/windows/` を移植すれば対応できます）。
+- A LaunchAgent (`~/Library/LaunchAgents/com.moooyooo.custom-harnes-local-llm.plist`) starts http://localhost:38720 at login and restarts it if it crashes.
+  macOS reports a new background item the first time; turn it off under System Settings > General > Login Items to stop it from starting.
+- So that the agent can run git, npm, docker and so on, `install` captures the PATH, SHELL and LANG of the terminal it runs in.
+  Run `install` again after installing new commands, moving the folder or reinstalling node.
+- Production is rebuilt into `dist-prod/` on every start and served from there, so `npm run build` during development never changes it.
+- Logs go to `logs/harness.log`. Don't use `npm start` while it is registered (both would want the same port).
+- There is no autostart for Windows yet.
 
-## 機能（v0.1）
+## Features
 
-custom-harnes から引き継いだもの:
+Basics:
 
-- 応答のストリーミング表示（Markdown 対応）。思考（reasoning）もリアルタイムに表示し、完了後は折りたたむ
-- ツール呼び出しと結果の折りたたみ表示
-- GUI 上での実行許可ダイアログ
-- 中断、停止、セッション ID を指定した再開
-- 複数セッションをタブで並行して操作する（各タブにフォルダ名と状態を表示）。全タブの許可待ちを「受信箱」でまとめて処理する
-- 自動承認（左パネルで ON にする）：ホストに影響しない操作の確認を自動で「許可」する。
-  作業フォルダ外への書き込み・削除・git push・グローバルインストール・管理者権限・プロセスの操作などは、手動確認のまま
-  （判定ルールは `server/autoApprove.ts`）
-- git init/add/commit/push の直前にセキュリティチェックを行う（自動承認の ON/OFF、権限モードに関係なく実行）。
-  API キー・トークン・秘密鍵・パスワード付きの接続文字列・.env・証明書・.gitignore すべきフォルダ・大きなファイルを検出し、
-  見つかった場合は自動承認せず、許可ダイアログに一覧を表示する
-- 完了・許可待ちのブラウザ通知（ページが裏にあるとき、または別タブのときだけ通知する）
-- 初期画面で「最近の作業フォルダ」を選び、そのフォルダで新しく開始するか、過去のセッションを再開する
-- セッション履歴の一覧（日時・モデル・件数）。クリックで再開し、過去の会話も表示する
+- Streaming responses (Markdown). Thinking (reasoning) is shown live and folded when done
+- Collapsible tool calls and results
+- Permission prompts in the GUI
+- Interrupt, stop, and resume by session ID
+- Several sessions side by side in tabs (each shows its folder and state); an inbox for every tab's pending permissions
+- Auto-approval (turn it on in the left panel): answers prompts that can't affect the host.
+  Writes outside the working folder, deletions, git push, global installs, admin rights, process control and so on still ask
+  (rules in `server/autoApprove.ts`)
+- A security check right before git init/add/commit/push, whatever the auto-approval and permission mode.
+  It finds API keys, tokens, private keys, connection strings with passwords, .env files, certificates, folders that belong in
+  .gitignore and large files; if anything is found, the prompt lists it and is never auto-approved
+- Browser notifications for finished turns and permission prompts (only when the page is in the background or another tab is active)
+- Recent working folders on the start screen, to start a new session there or resume an earlier one
+- Session history (date, model, prompts); click to resume, with the past conversation shown
 
-ローカル LLM 向けに置き換え・追加したもの:
+For local LLMs:
 
-- **モデル選択**：インストール済みのモデルを一覧表示し、ツール / 思考 / 画像の対応、サイズ、最大コンテキスト長を表示する
-- **思考の切り替え**（既定 / オン / オフ / low・medium・high）と**コンテキスト長**（`num_ctx`）の指定
-- **コンテキスト使用率のメーターと生成速度（tok/s）**（Claude のレート制限メーターの代わり）
-- **Ollama の接続状態とメモリ上のモデル**の表示（認証バッジの代わり）
-- 権限モード: `default` / `acceptEdits` / `plan`（読み取りのみ・計画を立てる）/ `bypassPermissions`
-- 作業フォルダの `AGENTS.md` / `CLAUDE.md` をプロジェクトの指示としてシステムプロンプトに読み込む
-- ローカルモデルにありがちな失敗への対策: 同じツール呼び出しの繰り返しを止める、Read せずに Edit・上書きしない、
-  失敗が確定している呼び出しでは許可を求めない、ツール出力を上限で切り詰める
-- 長い作業を途中で止めないための対策:
-  - 大きなファイルは約 200 行ずつ分けて書くよう指示する
-  - 1 回の出力を 16,384 トークンまでに制限し、超えたら「小さく分けて」と自動で 1 回だけ再依頼する
-  - ツール呼び出しを生成している間（Ollama は何も送ってこない）も通信を切らず、最後の出力からの経過時間を表示する
-  - エラー・中断・上限で止まったときは「続きから再開」ボタンで、作業フォルダを確認させてから続けさせる
-- **画像入力**（vision 対応モデル）：スクリーンショットなどをクリップボードから貼り付け、ドラッグ＆ドロップ、または「画像」ボタンで添付する。
-  長い辺が 1600px を超える画像は縮小して送る（1 枚でおよそ 1,500 トークン）。画像非対応のモデルに切り替えても、過去の画像は注記に置き換えて会話を続けられる
-- **実行中の設定変更**：開始済みのタブでは、左パネルのモデル・思考・コンテキスト長・権限モードを変えると次のメッセージから適用される（応答中は変更不可）
-- **コンテキストの圧縮**：コンテキストの 80% に近づくと、古いやり取りをモデルに要約させて置き換える
-  （Ollama は上限を超えると古い内容を黙って捨てるため）。直近のやり取りと最新の依頼の原文は残す。
-  左パネルの「会話を要約」でいつでも実行でき、要約の内容は会話の中で開いて確認できる
+- **Model picker** listing installed models with their tool / thinking / vision support, size and maximum context length
+- **Thinking** (default / on / off / low · medium · high) and **context length** (`num_ctx`)
+- **Context usage meter and generation speed** (tok/s)
+- **Ollama connection state and loaded models**
+- Permission modes: `default` / `acceptEdits` / `plan` (read-only, makes a plan) / `bypassPermissions`
+- The working folder's `AGENTS.md` / `CLAUDE.md` are read into the system prompt as project instructions
+- Guards against typical local-model failures: repeated identical tool calls are stopped, no Edit or overwrite without a prior Read,
+  no prompt for a call that would fail anyway, tool output is capped
+- Keeping long tasks going:
+  - the model is told to write large files about 200 lines at a time
+  - each reply is capped at 16,384 tokens; a cut-off reply is retried once with a request to work in smaller steps
+  - the connection stays open while the model writes a tool call (Ollama streams nothing meanwhile), and the time since the last output is shown
+  - after an error, an interrupt or a limit, 「続きから再開」 (continue) has the model check the working folder and carry on
+- **Image input** (vision models): paste a screenshot from the clipboard, drag and drop, or use the 「画像」 (image) button.
+  Images are scaled to at most 1600 px (about 1,500 tokens each). After switching to a model without vision, earlier images become a note
+- **Settings between turns**: in a started tab, changing the model, thinking, context length, permission mode or web search applies from the next message
+- **Context compaction**: near 80% of the context window, older messages are replaced by a summary the model writes
+  (Ollama silently drops the oldest part of an oversized prompt). The newest messages and the latest request are kept word for word.
+  「会話を要約」 (summarize) does it on demand, and the summary can be opened in the transcript
+- **Web search** (off by default): searches through a local SearXNG and reads pages as plain text.
+  Page fetches never reach this machine or the LAN, and queries or URLs that look like they carry a secret are not sent
 
-### エージェントが使えるツール
+### Tools the agent can use
 
-| ツール | 内容 | 確認（default モード） |
+| Tool | What it does | Asks in `default` mode |
 | --- | --- | --- |
-| Read / Glob / Grep / LS | 読み取り・検索 | 作業フォルダ内は確認なし（外や認証情報は確認） |
-| Write / Edit | ファイルの作成・上書き・部分置換 | 確認あり（`acceptEdits` ではフォルダ内は確認なし） |
-| Bash（Windows では PowerShell） | コマンド実行（既定 2 分でタイムアウト） | 確認あり |
-| WebSearch / WebFetch（Web 検索が ON のときだけ） | SearXNG での検索・Web ページの取得（このマシンと LAN には届かない） | 確認あり（自動承認の対象） |
+| Read / Glob / Grep / LS | Read and search | Not inside the working folder (outside, or credentials: asks) |
+| Write / Edit | Create, overwrite or patch files | Yes (`acceptEdits`: not inside the working folder) |
+| Bash (PowerShell on Windows) | Run commands (2-minute default timeout) | Yes |
+| WebSearch / WebFetch (only with web search on) | Search via SearXNG, read web pages (never this machine or the LAN) | Yes (eligible for auto-approval) |
 
-## 環境変数
+## Environment variables
 
-| 変数 | 既定値 | 説明 |
+| Variable | Default | Description |
 | --- | --- | --- |
-| `PORT` | 本番 `38720` / 開発 `38721` | サーバーのポート（既定値は `shared/ports.ts`） |
-| `HARNESS_CWD` | サーバー起動時のフォルダ | 作業フォルダの既定値 |
-| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama の URL |
-| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | セッション履歴の保存先（`sessions/<id>.jsonl`）と SearXNG の設定（`searxng/`） |
-| `SEARXNG_URL` | `http://127.0.0.1:38730` | WebSearch が使う SearXNG の URL |
+| `PORT` | production `38720` / development `38721` | Server port (defaults in `shared/ports.ts`) |
+| `HARNESS_CWD` | the folder the server starts in | Default working folder |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama URL |
+| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | Session history (`sessions/<id>.jsonl`) and SearXNG settings (`searxng/`) |
+| `SEARXNG_URL` | `http://127.0.0.1:38730` | SearXNG used by WebSearch |
 
-## ヒント
+## Tips
 
-- モデルの初回読み込みには数秒〜数十秒かかります。読み込み済みのモデルは左下の「メモリ上のモデル」に表示されます
-- 長い作業では 32K 以上のコンテキスト長をおすすめします。モデルが指定より小さい窓で読み込まれていたら、ハーネスが解放して読み込み直します
-  （MLX 系のモデルは、Ollama が自分では読み込み直さないため）。読み込み直しには数十秒かかります
-- 思考をオフにすると速くなりますが、難しい作業の質は下がります
-- MoE モデル（`qwen3-coder:30b`、`qwen3.6:35b-a3b` など）は速く、対話的な作業に向いています
+- Loading a model takes a few to several tens of seconds; loaded models are listed at the bottom left
+- Use a context length of 32K or more for long tasks. If Ollama has the model loaded with a smaller window, the harness frees it so it
+  loads again with yours (Ollama doesn't reload MLX models for a larger `num_ctx` by itself). Reloading takes some tens of seconds
+- Turning thinking off is faster, but hard tasks suffer
+- MoE models (`qwen3-coder:30b`, `qwen3.6:35b-a3b`, ...) are fast and suit interactive work
 
-## 注意
+## Cautions
 
-- 自分のマシン上で、自分だけが使う前提で作っています
-- サーバーは `127.0.0.1` でのみ待ち受け、WebSocket は許可したオリジンからしか受け付けません
-- ローカルモデルはクラウドの最上位モデルより間違えやすいです。`bypassPermissions` や自動承認は、内容を理解したうえで使ってください
+- Built for personal use on your own machine. Don't expose it to the network
+- The agent edits files and runs commands on your machine
+- The server listens on `127.0.0.1` only, and the WebSocket accepts only its own origins
+- Local models make more mistakes than top cloud models. Use `bypassPermissions` and auto-approval only when you understand what they allow
+- With web search on, queries and fetched URLs leave your machine
 
-## ライセンス
+## License
 
 [MIT](LICENSE)
