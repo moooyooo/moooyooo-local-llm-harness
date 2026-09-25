@@ -2,6 +2,8 @@
 
 English | [日本語](README.ja.md)
 
+[![CI](https://github.com/moooyooo/local-llm-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/moooyooo/local-llm-harness/actions/workflows/ci.yml)
+
 A local-only web GUI that runs **local LLMs served by [Ollama](https://ollama.com)** as a coding agent.
 Its UX follows the author's (private) web GUI for Claude Code.
 
@@ -9,7 +11,10 @@ Instead of driving a CLI, the server runs its own agent loop against Ollama's `/
 files and run commands. Everything stays on your machine, unless you turn web search on.
 
 - Tested on macOS (Apple silicon) with Ollama 0.32. Windows (with PowerShell as the shell) is supported by design but untested.
-- **The UI is in Japanese.** Button names are quoted below with their meaning.
+- **UI language: Japanese for now; English and Chinese are planned.** All UI text lives in language catalogs, so a new
+  language is a new catalog (see [Adding a language](#adding-a-language)). Until then, button names are quoted below with their meaning.
+
+![A finished turn: the agent wrote fizzbuzz.py and its tests, ran them after asking, and summarized](docs/screenshot.jpg)
 
 ## Requirements
 
@@ -34,6 +39,8 @@ npm start          # production: http://localhost:38720
 1. In the left panel, choose the working folder, model, thinking, context length and permission mode.
 2. Press 「開始」 (Start) and send a message.
 3. Before a file edit or a command, the GUI asks 「許可 / 拒否」 (Allow / Deny); edits are shown as diffs.
+
+<img src="docs/screenshot-permission.jpg" alt="The agent asks before running a command" width="720">
 
 ### Web search setup (optional)
 
@@ -83,6 +90,8 @@ Basics:
 - Session history (date, model, prompts); click to resume, with the past conversation shown
 
 For local LLMs:
+
+- **Ready for more languages**: all UI text is in per-language catalogs (Japanese now; English and Chinese planned)
 
 - **Model picker** listing installed models with their tool / thinking / vision support, size and maximum context length
 - **Thinking** (default / on / off / low · medium · high) and **context length** (`num_ctx`)
@@ -140,6 +149,21 @@ For local LLMs:
 - The server listens on `127.0.0.1` only, and the WebSocket accepts only its own origins
 - Local models make more mistakes than top cloud models. Use `bypassPermissions` and auto-approval only when you understand what they allow
 - With web search on, queries and fetched URLs leave your machine
+
+## Adding a language
+
+All text the GUI shows lives in `shared/i18n/`. Japanese (`ja.ts`) is the source: it defines the message keys, and fills in
+whatever a translation hasn't covered yet, so a partial translation already works.
+
+1. Copy `shared/i18n/ja.ts` to e.g. `shared/i18n/en.ts`, rename the export to `en`, type it `Catalog`, and translate the values.
+   Keep every `{placeholder}`.
+2. Register it in `LOCALES` in `shared/i18n/index.ts`, with the name to show (e.g. `en: { name: 'English', messages: en }`).
+   The GUI then picks it for browsers set to that language, and shows a language picker in the left panel.
+3. Run `npm test`: it checks that each catalog uses only known keys with the same placeholders, and fails if GUI text is
+   written directly in the code instead of the catalogs.
+
+The server sends messages as keys with values rather than finished sentences, so saved history is shown in the current
+language too. Output meant for whoever runs the harness (server logs, `scripts/`) is not translated yet.
 
 ## License
 

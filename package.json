@@ -5,6 +5,9 @@
   "description": "Local web GUI coding-agent harness that runs local LLMs through Ollama",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "tsx watch server/index.ts --dev",
