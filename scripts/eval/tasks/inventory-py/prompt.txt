@@ -1,0 +1,1 @@
+README.md の仕様どおりに inventory.py を実装し、python3 -m unittest -v がすべて通るようにしてください。テストファイル（test_inventory.py）は変更しないでください。

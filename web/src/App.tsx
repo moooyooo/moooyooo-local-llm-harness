@@ -15,7 +15,7 @@ import {
 import { base64Of, imageFiles, MAX_IMAGES, readImage, type Attachment } from './images';
 import type { MessageKey } from '../../shared/i18n';
 import { LANGUAGES, preferredLocale, setLocale, t, tNodes, tx } from './i18n';
-import { activeTab, newTabKey, pendingPermissions, tabCwd, tabLabel } from './state';
+import { activeTab, newTabKey, pendingPermissions, tabCwd, tabLabel, type SavedTabs } from './state';
 import { useHarness } from './useHarness';
 import { formatBytes, formatTokens, summarizeInput } from './util';
 
@@ -36,6 +36,8 @@ const PERMISSION_MODES: { value: PermissionMode; label: MessageKey }[] = [
   { value: 'bypassPermissions', label: 'app.mode.bypassPermissions' },
 ];
 const SETTINGS_KEY = 'custom-harnes-local.settings';
+/** Open tabs, so a reloaded page shows the sessions that kept running on the server. */
+const TABS_KEY = 'custom-harnes-local.tabs';
 const APP_TITLE = 'Local LLM Harness';
 
 interface Settings {
@@ -64,6 +66,15 @@ function loadSettings(): Settings {
   }
 }
 
+function loadTabs(): SavedTabs | undefined {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TABS_KEY) ?? 'null') as SavedTabs | null;
+    return Array.isArray(saved?.tabs) ? { ...saved, tabs: saved.tabs.filter((tb) => typeof tb?.key === 'string' && typeof tb.cwd === 'string') } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -76,7 +87,8 @@ export function App() {
 
   const locale = preferredLocale(settings.locale);
   setLocale(locale);
-  const { state, dispatch, send } = useHarness(settings.lastCwd ?? '', (msg) => notify(msg));
+  const [initialTabs] = useState(loadTabs);
+  const { state, dispatch, send } = useHarness({ cwd: settings.lastCwd ?? '', saved: initialTabs }, (msg) => notify(msg));
   const tab = activeTab(state);
   const cwd = tabCwd(state, tab);
 
@@ -120,6 +132,15 @@ export function App() {
       // storage unavailable
     }
   }, [settings]);
+
+  const savedTabs = JSON.stringify({ tabs: state.tabs.map(({ key, cwd: dir }) => ({ key, cwd: dir })), activeKey: state.activeKey } satisfies SavedTabs);
+  useEffect(() => {
+    try {
+      localStorage.setItem(TABS_KEY, savedTabs);
+    } catch {
+      // storage unavailable
+    }
+  }, [savedTabs]);
 
   // The server decides auto-approval, so tell it the setting on every (re)connect and change.
   useEffect(() => {

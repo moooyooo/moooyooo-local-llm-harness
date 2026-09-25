@@ -22,8 +22,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** Built GUI to serve. scripts/harness.mjs uses dist-prod/, so a development `npm run build` never swaps production's GUI. */
 const DIST = path.resolve(ROOT, process.env.HARNESS_DIST ?? 'dist');
 const DEFAULT_CWD = process.env.HARNESS_CWD ?? process.cwd();
-/** Per connection. Sessions share the machine's memory, so keep this modest. */
+/** Sessions at once. They share the machine's memory, so keep this modest. */
 const MAX_SESSIONS = 10;
+/** A session no GUI shows any more is stopped after this long without a turn running (see `live`). */
+const DETACHED_IDLE_MS = 30 * 60_000;
 const PERMISSION_MODES = new Set<PermissionMode>(['default', 'acceptEdits', 'plan', 'bypassPermissions']);
 const THINK_SETTINGS = new Set<ThinkSetting>(['', 'on', 'off', 'low', 'medium', 'high']);
 
@@ -38,6 +40,35 @@ const checkpoints = new CheckpointStore();
 checkpoints.prune().catch((err) => console.error(`古いチェックポイントの削除に失敗: ${err}`));
 
 const errorText = (err: unknown): Text => (err instanceof TextError ? err.text : String(err));
+
+/** One browser connection. */
+interface Connection {
+  send: (m: ServerMessage) => void;
+  autoApprove: boolean;
+}
+
+/**
+ * Running sessions by GUI tab key. A session outlives the connection that started it: closing or reloading the page
+ * detaches it, the turn goes on, and the tab attaches again when it comes back (`attach`).
+ */
+interface Live {
+  session: AgentSession;
+  /** The connection showing this tab; none while detached. */
+  owner?: Connection;
+  /** Auto-approval as last set by a connection showing it, kept while detached. */
+  autoApprove: boolean;
+  lastActive: number;
+}
+const live = new Map<string, Live>();
+
+setInterval(() => {
+  for (const [key, l] of live) {
+    if (!l.owner && !l.session.busy && Date.now() - l.lastActive > DETACHED_IDLE_MS) {
+      live.delete(key);
+      l.session.stop();
+    }
+  }
+}, 60_000).unref();
 
 /** Validated session settings plus the model's capabilities. Throws a message for the user. */
 async function resolveSettings(o: SessionSettings) {
@@ -88,20 +119,41 @@ const wss = new WebSocketServer({
 });
 
 wss.on('connection', (ws: WebSocket) => {
-  // One agent per GUI tab, keyed by the client's tab key.
-  const sessions = new Map<string, AgentSession>();
+  const conn: Connection = { send: (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m)), autoApprove: false };
+  const { send } = conn;
   /** Latest `start` per key, so a slow start that was superseded doesn't register. */
   const starting = new Map<string, symbol>();
-  let autoApprove = false;
-  const send = (m: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m));
+  /** The session of a tab this connection shows. */
+  const sessionOf = (key: string) => {
+    const l = live.get(key);
+    return l?.owner === conn ? l.session : undefined;
+  };
 
   const stopSession = (key: string) => {
     starting.delete(key);
-    const s = sessions.get(key);
-    if (!s) return;
-    sessions.delete(key);
-    s.stop();
+    const l = live.get(key);
+    if (!l) return;
+    live.delete(key);
+    l.session.stop();
     send({ type: 'status', key, running: false });
+    if (l.owner && l.owner !== conn) l.owner.send({ type: 'status', key, running: false });
+  };
+
+  /** Shows a running session in this connection's tab `key` again: its history, state and pending prompts. */
+  const attach = async (key: string) => {
+    const l = live.get(key);
+    if (!l) return send({ type: 'status', key, running: false });
+    // Another window showing the same tab loses it.
+    if (l.owner && l.owner !== conn) l.owner.send({ type: 'status', key, running: false });
+    l.owner = conn;
+    l.autoApprove = conn.autoApprove;
+    const s = l.session;
+    const records = (await store.load(s.config.sessionId)) ?? [];
+    if (live.get(key) !== l || l.owner !== conn) return;
+    send({ type: 'status', key, running: true });
+    send({ type: 'attached', key, sessionId: s.config.sessionId, ...toEvents(records), busy: s.busy });
+    s.init();
+    for (const ev of s.pendingPrompts()) send({ type: 'event', key, ev });
   };
 
   const sendModels = async () => {
@@ -136,7 +188,7 @@ wss.on('connection', (ws: WebSocket) => {
     // Superseded by another start/stop for this tab, or the socket closed, while loading.
     if (starting.get(key) !== token) return;
     starting.delete(key);
-    if (sessions.size >= MAX_SESSIONS) {
+    if (live.size >= MAX_SESSIONS) {
       return send({ type: 'error', key, message: text('error.tooManySessions', { max: MAX_SESSIONS }) });
     }
 
@@ -151,14 +203,18 @@ wss.on('connection', (ws: WebSocket) => {
       {
         chat,
         store,
-        autoApprove: () => autoApprove,
+        autoApprove: () => live.get(key)?.autoApprove ?? false,
         contextLength: async (model) => (await listLoaded()).find((m) => m.name === model)?.contextLength,
         unload: (model, signal) => unloadModel(model, signal),
         checkpoints,
       },
     );
-    s.on('event', (ev) => send({ type: 'event', key, ev }));
-    sessions.set(key, s);
+    const entry: Live = { session: s, owner: conn, autoApprove: conn.autoApprove, lastActive: Date.now() };
+    s.on('event', (ev) => {
+      entry.lastActive = Date.now();
+      entry.owner?.send({ type: 'event', key, ev });
+    });
+    live.set(key, entry);
     send({ type: 'status', key, running: true });
     s.init();
     if (records && o.resume) send({ type: 'history', key, sessionId: o.resume, ...toEvents(records) });
@@ -175,7 +231,13 @@ wss.on('connection', (ws: WebSocket) => {
     }
     switch (msg.type) {
       case 'setAutoApprove':
-        autoApprove = !!msg.enabled;
+        conn.autoApprove = !!msg.enabled;
+        for (const l of live.values()) if (l.owner === conn) l.autoApprove = conn.autoApprove;
+        return;
+      case 'attach':
+        for (const key of Array.isArray(msg.keys) ? msg.keys.slice(0, MAX_SESSIONS * 2) : []) {
+          if (isValidKey(key)) attach(key).catch((err) => send({ type: 'error', key, message: String(err) }));
+        }
         return;
       case 'listModels':
         sendModels();
@@ -194,7 +256,7 @@ wss.on('connection', (ws: WebSocket) => {
         start(msg.key, msg).catch((err) => send({ type: 'error', key: msg.key, message: String(err) }));
         break;
       case 'user': {
-        const s = sessions.get(msg.key);
+        const s = sessionOf(msg.key);
         if (!s) return send({ type: 'error', key: msg.key, message: text('error.notStarted') });
         if (s.busy) return send({ type: 'error', key: msg.key, message: text('error.busySend') });
         const badImages = checkImages(msg.images);
@@ -208,7 +270,7 @@ wss.on('connection', (ws: WebSocket) => {
         break;
       }
       case 'configure': {
-        const s = sessions.get(msg.key);
+        const s = sessionOf(msg.key);
         if (!s) return send({ type: 'error', key: msg.key, message: text('error.notStarted') });
         resolveSettings(msg.options ?? {})
           .then((settings) => {
@@ -218,10 +280,10 @@ wss.on('connection', (ws: WebSocket) => {
         break;
       }
       case 'permission':
-        sessions.get(msg.key)?.respondPermission(msg.requestId, !!msg.allow, msg.message);
+        sessionOf(msg.key)?.respondPermission(msg.requestId, !!msg.allow, msg.message);
         break;
       case 'compact': {
-        const s = sessions.get(msg.key);
+        const s = sessionOf(msg.key);
         if (!s) return send({ type: 'error', key: msg.key, message: text('error.notStarted') });
         if (s.busy) return send({ type: 'error', key: msg.key, message: text('error.busyCompact') });
         s.compactNow().catch((err) => send({ type: 'error', key: msg.key, message: String(err) }));
@@ -230,7 +292,7 @@ wss.on('connection', (ws: WebSocket) => {
       case 'checkpointChanges':
       case 'checkpointPatch':
       case 'restoreCheckpoint': {
-        const s = sessions.get(msg.key);
+        const s = sessionOf(msg.key);
         if (!s) return send({ type: 'error', key: msg.key, message: text('error.notStarted') });
         // Only this session's own checkpoints (which also keeps the commit a plain hash).
         if (typeof msg.commit !== 'string' || !s.hasCheckpoint(msg.commit)) {
@@ -257,7 +319,7 @@ wss.on('connection', (ws: WebSocket) => {
         break;
       }
       case 'interrupt':
-        sessions.get(msg.key)?.interrupt();
+        sessionOf(msg.key)?.interrupt();
         break;
       case 'stop':
         stopSession(msg.key);
@@ -265,9 +327,14 @@ wss.on('connection', (ws: WebSocket) => {
     }
   });
 
+  // Sessions go on without a GUI; the tab attaches again when the page comes back.
   ws.on('close', () => {
     starting.clear();
-    for (const key of [...sessions.keys()]) stopSession(key);
+    for (const l of live.values()) {
+      if (l.owner !== conn) continue;
+      l.owner = undefined;
+      l.lastActive = Date.now();
+    }
   });
 });
 

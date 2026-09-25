@@ -1,0 +1,1 @@
+README.md の仕様どおりに Markdown を HTML に変換する md パッケージ（md/__init__.py、md/blocks.py、md/inline.py）を実装し、python3 -m unittest discover -s tests -t . -v がすべて通るようにしてください。tests/ のテストは変更しないでください。

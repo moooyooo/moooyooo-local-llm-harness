@@ -1,7 +1,8 @@
 import type { LoadedModel, ModelInfo, OllamaStatus } from '../../../shared/protocol';
 import type { MessageKey } from '../../../shared/i18n';
 import { t, tx } from '../i18n';
-import type { Tab } from '../state';
+import type { Todo } from '../../../shared/todos';
+import { latestTodos, type Tab } from '../state';
 import { formatBytes, formatTokens } from '../util';
 
 /** Think settings with a translated name; levels (low, medium, high) are shown as they are. */
@@ -45,6 +46,7 @@ export function SessionPanel({ tab, onCompact }: { tab: Tab; onCompact: () => vo
           {stats.tokensPerSec != null && <div><span>{t('session.speed')}</span><code>{stats.tokensPerSec.toFixed(1)} tok/s</code></div>}
         </>
       )}
+      {s && <TodoList todos={latestTodos(tab)} />}
       {s && (
         <button
           className="small"
@@ -55,6 +57,26 @@ export function SessionPanel({ tab, onCompact }: { tab: Tab; onCompact: () => vo
           {t('session.compact')}
         </button>
       )}
+    </div>
+  );
+}
+
+const TODO_MARK = { completed: '☑', in_progress: '▶', pending: '☐' } as const;
+
+/** The model's checklist for the current task (from its TodoWrite calls). */
+export function TodoList({ todos }: { todos?: Todo[] }) {
+  if (!todos?.length) return null;
+  const done = todos.filter((t) => t.status === 'completed').length;
+  return (
+    <div className="todos">
+      <div className="muted">{t('session.todos', { done, total: todos.length })}</div>
+      <ul>
+        {todos.map((todo, i) => (
+          <li key={i} className={todo.status}>
+            <span className="mark">{TODO_MARK[todo.status]}</span> {todo.content}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

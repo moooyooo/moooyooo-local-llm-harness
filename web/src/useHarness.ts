@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import type { ClientMessage, ServerMessage } from '../../shared/protocol';
-import { createInitialState, reducer } from './state';
+import { createInitialState, reducer, type SavedTabs } from './state';
 
 const RECONNECT_MS = 2000;
 
 /**
- * @param initialCwd working folder for the first tab
+ * @param initial working folder for the first tab, and the tabs of the last page load
  * @param onMessage side-effect hook (e.g. notifications), called before the message is reduced
  */
-export function useHarness(initialCwd: string, onMessage?: (msg: ServerMessage) => void) {
-  const [state, dispatch] = useReducer(reducer, initialCwd, createInitialState);
+export function useHarness(initial: { cwd: string; saved?: SavedTabs }, onMessage?: (msg: ServerMessage) => void) {
+  const [state, dispatch] = useReducer(reducer, initial, createInitialState);
   const wsRef = useRef<WebSocket | null>(null);
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
+  const tabsRef = useRef(state.tabs);
+  tabsRef.current = state.tabs;
 
   useEffect(() => {
     let disposed = false;
@@ -32,6 +34,8 @@ export function useHarness(initialCwd: string, onMessage?: (msg: ServerMessage) 
           request({ type: 'listSessions' });
           request({ type: 'listModels' });
         }
+        // Sessions keep running on the server while the page is away; show this page's tabs' sessions again.
+        if (msg.type === 'hello') request({ type: 'attach', keys: tabsRef.current.map((tb) => tb.key) });
       };
       ws.onclose = () => {
         if (disposed) return;

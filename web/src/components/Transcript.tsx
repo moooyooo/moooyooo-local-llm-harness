@@ -6,7 +6,9 @@ import { t, tNodes, tx } from '../i18n';
 import { imageFiles, type Attachment } from '../images';
 import { pendingPermissions, type Item, type PermissionItem, type Tab } from '../state';
 import { formatDuration, formatTokens, lineDiff, summarizeInput, truncate } from '../util';
+import { parseTodos } from '../../../shared/todos';
 import { CheckpointRow, type CheckpointHandlers } from './Checkpoint';
+import { TodoList } from './SidebarParts';
 
 export type PermissionHandler = (id: string, allow: boolean) => void;
 
@@ -204,6 +206,10 @@ function ToolInput({ name, input, max = 8000 }: { name: string; input: Record<st
         <pre>{truncate(input.content, max)}</pre>
       </div>
     );
+  }
+  if (name === 'TodoWrite') {
+    const parsed = parseTodos(input.todos);
+    if ('todos' in parsed) return <TodoList todos={parsed.todos} />;
   }
   if ((name === 'Bash' || name === 'PowerShell') && typeof input.command === 'string') {
     return <pre className="command">{truncate(input.command, max)}</pre>;

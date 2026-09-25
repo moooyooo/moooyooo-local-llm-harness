@@ -14,6 +14,7 @@ import type {
   TurnStats,
 } from '../../shared/protocol';
 import { msg as text, type Text } from '../../shared/i18n';
+import { parseTodos, type Todo } from '../../shared/todos';
 import { t } from './i18n';
 import { imageDataUrl } from './images';
 import { baseName } from './util';
@@ -139,9 +140,16 @@ export function newTab(cwd: string, key = newTabKey()): Tab {
   return { key, cwd, running: false, busy: false, items: [], streamText: '', streamThinking: '', unread: false, checkpointData: {} };
 }
 
-export function createInitialState(cwd: string): State {
-  const tab = newTab(cwd);
-  return { connected: false, defaultCwd: '', dataDir: '', models: [], loaded: [], sessions: [], folders: [], tabs: [tab], activeKey: tab.key };
+/** Tabs kept across page loads, so running sessions can be shown again (see `attached`). */
+export interface SavedTabs {
+  tabs: { key: string; cwd: string }[];
+  activeKey?: string;
+}
+
+export function createInitialState({ cwd, saved }: { cwd: string; saved?: SavedTabs }): State {
+  const tabs = saved?.tabs.length ? saved.tabs.map((tb) => newTab(tb.cwd, tb.key)) : [newTab(cwd)];
+  const activeKey = tabs.some((tb) => tb.key === saved?.activeKey) ? saved!.activeKey! : tabs[0].key;
+  return { connected: false, defaultCwd: '', dataDir: '', models: [], loaded: [], sessions: [], folders: [], tabs, activeKey };
 }
 
 export function activeTab(state: State): Tab {
@@ -158,6 +166,14 @@ export function tabLabel(state: State, tab: Tab): string {
 
 export function pendingPermissions(tab: Tab): PermissionItem[] {
   return tab.items.filter((it): it is PermissionItem => it.kind === 'permission' && it.status === 'pending');
+}
+
+/** The model's checklist from its latest successful TodoWrite call. */
+export function latestTodos(tab: Tab): Todo[] | undefined {
+  const call = tab.items.findLast((it) => it.kind === 'tool' && it.name === 'TodoWrite' && it.result != null && !it.isError);
+  if (call?.kind !== 'tool') return undefined;
+  const parsed = parseTodos(call.input.todos);
+  return 'todos' in parsed ? parsed.todos : undefined;
 }
 
 export function tabStatus(tab: Tab): TabStatus {
@@ -285,6 +301,14 @@ function onServer(state: State, msg: ServerMessage, at: number): State {
         if (msg.omitted > 0) next = pushItems(next, notice(text('history.omitted', { count: msg.omitted })));
         for (const ev of msg.events) next = onEvent(next, ev);
         return pushItems({ ...next, busy: false }, notice(text('history.end', { id: msg.sessionId.slice(0, 8) })));
+      });
+    case 'attached':
+      // The page reconnected to a session that kept running: rebuild the tab from what the session saved.
+      return updateTab(state, msg.key, (t) => {
+        let next: Tab = { ...newTab(t.cwd, t.key), running: true, session: t.session };
+        if (msg.omitted > 0) next = pushItems(next, notice(text('history.omitted', { count: msg.omitted })));
+        for (const ev of msg.events) next = onEvent(next, ev);
+        return { ...next, busy: msg.busy, lastActivity: at };
       });
     case 'event': {
       const unread = msg.ev.type === 'result' && msg.key !== state.activeKey;

@@ -106,6 +106,8 @@ For local LLMs:
   - each reply is capped at 16,384 tokens; a cut-off reply is retried once with a request to work in smaller steps
   - the connection stays open while the model writes a tool call (Ollama streams nothing meanwhile), and the time since the last output is shown
   - after an error, an interrupt or a limit, 「続きから再開」 (continue) has the model check the working folder and carry on
+  - closing or reloading the page doesn't stop a session: the turn goes on, and the tab shows it again when the page
+    comes back (open tabs are remembered in the browser). A session no page shows is stopped after 30 minutes without a turn running
 - **Image input** (vision models): paste a screenshot from the clipboard, drag and drop, or use the 「画像」 (image) button.
   Images are scaled to at most 1600 px (about 1,500 tokens each). After switching to a model without vision, earlier images become a note
 - **Settings between turns**: in a started tab, changing the model, thinking, context length, permission mode or web search applies from the next message
@@ -156,6 +158,7 @@ For local LLMs:
 - The server listens on `127.0.0.1` only, and the WebSocket accepts only its own origins
 - Local models make more mistakes than top cloud models. Use `bypassPermissions` and auto-approval only when you understand what they allow
 - With web search on, queries and fetched URLs leave your machine
+- Closing the page does not stop a running task. To stop one, use 「停止」 (stop) or close its tab (×)
 
 ## Adding a language
 

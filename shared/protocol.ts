@@ -55,6 +55,8 @@ export type ClientMessage =
   /** Put the working folder's files back as they were at a checkpoint (between turns). */
   | { type: 'restoreCheckpoint'; key: string; commit: string }
   | { type: 'listSessions' }
+  /** Tabs of a page that (re)connected: show their sessions again if they are still running. */
+  | { type: 'attach'; keys: string[] }
   /** Installed and loaded models, and the Ollama connection state. */
   | { type: 'listModels' }
   /** Connection-wide: auto-approve permission prompts that can't affect the host (see server/autoApprove.ts). */
@@ -220,6 +222,8 @@ export type ServerMessage =
   | { type: 'sessions'; sessions: SessionSummary[]; folders: FolderSummary[] }
   /** Past transcript of a resumed session. */
   | { type: 'history'; key: string; sessionId: string; events: AgentEvent[]; omitted: number }
+  /** A tab's running session after `attach`: its transcript so far (like `history`) and whether a turn is running. */
+  | { type: 'attached'; key: string; sessionId: string; events: AgentEvent[]; omitted: number; busy: boolean }
   /** Answers to `checkpointChanges` / `checkpointPatch`. */
   | { type: 'checkpointChanges'; key: string; commit: string; files: FileChange[]; truncated: boolean; error?: Text }
   | { type: 'checkpointPatch'; key: string; commit: string; path: string; patch: string; truncated: boolean; error?: Text }

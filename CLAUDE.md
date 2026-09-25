@@ -13,8 +13,11 @@ It is for personal, local use only: do not add features that expose it to other 
 Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJSON stream) ⇄ Ollama /api/chat
 ```
 
-- `server/agent.ts`: `AgentSession`, one per GUI tab (a connection holds up to `MAX_SESSIONS` in a `Map<key, AgentSession>`
-  in `server/index.ts`; closing the socket stops them all). `sendUser` runs one turn: call the model → run the tool calls
+- `server/index.ts`: sessions live in `live` by GUI tab key (up to `MAX_SESSIONS`), not per connection. Closing or
+  reloading the page detaches them and turns go on (auto-approval keeps its last setting); the page remembers its tabs
+  in localStorage and sends `attach` on connect, which replays the saved history (`attached`) and pending prompts
+  (`AgentSession.pendingPrompts`). Detached sessions idle for `DETACHED_IDLE_MS` are stopped.
+- `server/agent.ts`: `AgentSession`, one per GUI tab. `sendUser` runs one turn: call the model → run the tool calls
   (permission gate → user prompt or auto-approval → tool) → feed results back, until the model answers without tool calls.
   Every tool call always gets a `tool` message, even when interrupted, so the conversation stays valid.
   Model, think, `num_ctx` and permission mode can change between turns (`configure`, the `configure` client message);
@@ -41,6 +44,7 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 - `server/tools.ts`: Read / Write / Edit / Bash (PowerShell on Windows) / Glob / Grep / LS. Names and parameters follow
   Claude Code's tools so models use them naturally and `autoApprove.ts` classifies them unchanged. `validate` runs before
   the permission prompt so the user isn't asked about calls that would fail anyway (e.g. Edit without a prior Read).
+  A path that doesn't exist gets the working folder and, if a file of that name is there, its path (`missingHint`).
 - `server/permissions.ts`: `gate()` decides allow / ask / deny per permission mode; `assess()` adds the classifier decision and,
   for git init/add/commit/push, the security scan. git init/add/commit/push always ask, even in `bypassPermissions`.
 - `server/autoApprove.ts`, `server/shellParse.ts`, `server/secretScan.ts`: taken from custom-harnes. Policy: allowlist only.
@@ -84,6 +88,10 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 - `npm run typecheck`: checks both server and web (TypeScript 7)
 - `npm run searxng [-- stop|status]`: the local SearXNG container for WebSearch (needs Docker, e.g. OrbStack)
 - `npm test`: node:test via tsx (`server/**/*.test.ts`). `agent.test.ts` drives the loop with a scripted fake model.
+- `scripts/eval/eval.sh LABEL REF [--model M --runs N ...] TASK...`: gives the fixed tasks in `scripts/eval/tasks/` (each
+  checked by its own untouched copy of its tests) to the harness at git ref REF (or `worktree`), headless in a Docker
+  container against this machine's Ollama. The agent runs in bypassPermissions there, so never run `run.mts` on the host.
+  Compare versions with `npx tsx scripts/eval/summary.mts` (results in `/tmp/llh-eval/results.jsonl`).
 
 ## Rules
 

@@ -42,6 +42,17 @@ test('Edit needs a prior Read and a unique match', async () => {
   assert.match(all.output, /2 replacements/);
 });
 
+test('a path that does not exist gets the working folder, and the file there with that name', async () => {
+  const ctx = setup({ 'src/a.py': 'x\n' });
+  const guess = path.join(path.sep, 'home', 'user', 'project', 'src', 'a.py');
+  const r = await runTool('Read', { file_path: guess }, ctx);
+  assert.equal(r.isError, true);
+  assert.ok(r.output.includes(`The working folder is ${ctx.cwd}. Did you mean ${path.join(ctx.cwd, 'src', 'a.py')}?`), r.output);
+  const ls = await runTool('LS', { path: 'nope' }, ctx);
+  assert.ok(ls.output.includes(`The working folder is ${ctx.cwd}.`), ls.output);
+  assert.doesNotMatch(ls.output, /Did you mean/);
+});
+
 test('Edit keeps CRLF line endings', async () => {
   const ctx = setup({ 'w.txt': 'a\r\nb\r\n' });
   await runTool('Read', { file_path: 'w.txt' }, ctx);

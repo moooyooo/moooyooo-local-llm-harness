@@ -80,6 +80,7 @@ export const ja = {
   'session.context': 'コンテキスト',
   'session.contextHint': '最後のモデル呼び出しで使ったトークン数。80% を超えそうになると、古いやり取りを自動で要約します',
   'session.speed': '生成速度',
+  'session.todos': '作業リスト（{done}/{total} 完了）',
   'session.compact': '会話を要約',
   'session.compactHint': '古いやり取りをモデルに要約させて、コンテキストを空けます。直近のやり取りはそのまま残ります',
   'caps.tools': 'ツール',

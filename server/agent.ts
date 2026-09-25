@@ -95,6 +95,8 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   private tools: boolean;
   private readonly readFiles = new Set<string>();
   private readonly pending = new Map<string, (answer: { allow: boolean; message?: string }) => void>();
+  /** Permission prompts not answered yet, to show them again to a GUI that reconnects. */
+  private readonly prompts = new Map<string, Extract<AgentEvent, { type: 'permission' }>>();
   private abort?: AbortController;
   private metaWritten = false;
   private lastCall = { sig: '', count: 0 };
@@ -220,7 +222,13 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
     const resolve = this.pending.get(id);
     if (!resolve) return;
     this.pending.delete(id);
+    this.prompts.delete(id);
     resolve({ allow, message });
+  }
+
+  /** Permission prompts waiting for an answer. */
+  pendingPrompts(): Extract<AgentEvent, { type: 'permission' }>[] {
+    return [...this.prompts.values()];
   }
 
   interrupt() {
@@ -578,6 +586,8 @@ export class AgentSession extends EventEmitter<{ event: [AgentEvent] }> {
   }
 
   private send(ev: AgentEvent) {
+    if (ev.type === 'permission' && !ev.approval.applied) this.prompts.set(ev.id, ev);
+    if (ev.type === 'permissionCancelled') this.prompts.delete(ev.id);
     this.emit('event', ev);
   }
 }

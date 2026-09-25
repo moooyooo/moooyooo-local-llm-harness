@@ -94,12 +94,29 @@ export function capOutput(s: string, max = MAX_OUTPUT_CHARS): string {
   return `${s.slice(0, head)}\n\n…(${s.length - max} chars truncated)…\n\n${s.slice(-tail)}`;
 }
 
-async function readText(abs: string): Promise<string> {
+/**
+ * For a path that doesn't exist: where the working folder is, and the file of that name in it if there is one.
+ * Local models lose track of the folder (after a compaction, say) and guess paths like /home/user/project/a.py.
+ */
+function missingHint(abs: string, cwd: string): string {
+  const hints = [`The working folder is ${cwd}.`];
+  const parts = abs.split(/[\\/]/).filter(Boolean);
+  for (let n = Math.min(3, parts.length); n >= 1; n--) {
+    const candidate = path.join(cwd, ...parts.slice(-n));
+    if (candidate !== abs && existsSync(candidate)) {
+      hints.push(`Did you mean ${candidate}?`);
+      break;
+    }
+  }
+  return hints.join(' ');
+}
+
+async function readText(abs: string, cwd?: string): Promise<string> {
   let st;
   try {
     st = await stat(abs);
   } catch {
-    throw new ToolError(`File does not exist: ${abs}`);
+    throw new ToolError(`File does not exist: ${abs}${cwd ? `. ${missingHint(abs, cwd)}` : ''}`);
   }
   if (st.isDirectory()) throw new ToolError(`${abs} is a directory. Use LS to list it.`);
   if (st.size > MAX_READ_BYTES) throw new ToolError(`File is too large (${(st.size / 1024 / 1024).toFixed(1)} MB).`);
@@ -123,7 +140,7 @@ async function prepareEdit(input: Record<string, unknown>, ctx: ToolContext) {
   let oldStr = str(input, 'old_string')!;
   let newStr = typeof input.new_string === 'string' ? input.new_string : null;
   if (newStr == null) throw new ToolError('new_string is required');
-  if (!existsSync(abs)) throw new ToolError(`File does not exist: ${abs}. Use Write to create it.`);
+  if (!existsSync(abs)) throw new ToolError(`File does not exist: ${abs}. ${missingHint(abs, ctx.cwd)} Use Write to create a new file.`);
   if (!ctx.readFiles.has(abs)) throw new ToolError(`Read ${abs} first, then Edit it.`);
   if (oldStr === newStr) throw new ToolError('old_string and new_string are the same.');
   const text = await readText(abs);
@@ -160,7 +177,7 @@ const TOOLS: Record<string, ToolDef> = {
     },
     async run(input, ctx) {
       const abs = resolvePath(str(input, 'file_path')!, ctx.cwd);
-      const text = await readText(abs);
+      const text = await readText(abs, ctx.cwd);
       ctx.readFiles.add(abs);
       if (!text) return '(empty file)';
       const lines = text.replace(/\r\n/g, '\n').split('\n');
@@ -329,7 +346,7 @@ const TOOLS: Record<string, ToolDef> = {
       try {
         entries = await readdir(abs, { withFileTypes: true });
       } catch {
-        throw new ToolError(`Not a folder or not readable: ${abs}`);
+        throw new ToolError(`Not a folder or not readable: ${abs}. ${missingHint(abs, ctx.cwd)}`);
       }
       if (!entries.length) return '(empty folder)';
       const names = entries
@@ -573,7 +590,7 @@ async function jsGrep(pattern: string, target: string, mode: string, ignoreCase:
     else if (count && mode !== 'content') out.push(shown);
   };
   const st = await stat(target).catch(() => null);
-  if (!st) throw new ToolError(`Path does not exist: ${target}`);
+  if (!st) throw new ToolError(`Path does not exist: ${target}. ${missingHint(target, ctx.cwd)}`);
   await visit(target, st.isFile());
   return out;
 }
