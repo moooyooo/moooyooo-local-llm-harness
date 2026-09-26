@@ -1,8 +1,8 @@
-# Local LLM Harness
+# moooyooo Local LLM Harness
 
 English | [日本語](README.ja.md)
 
-[![CI](https://github.com/moooyooo/local-llm-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/moooyooo/local-llm-harness/actions/workflows/ci.yml)
+[![CI](https://github.com/moooyooo/moooyooo-local-llm-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/moooyooo/moooyooo-local-llm-harness/actions/workflows/ci.yml)
 
 A local-only web GUI that runs **local LLMs served by [Ollama](https://ollama.com)** as a coding agent.
 Its UX follows the author's (private) web GUI for Claude Code.
@@ -10,6 +10,8 @@ Its UX follows the author's (private) web GUI for Claude Code.
 Instead of driving a CLI, the server runs its own agent loop against Ollama's `/api/chat` (tool calling) to read and edit
 files and run commands. Everything stays on your machine, unless you turn web search on.
 
+- **Work in progress.** Developed with [Claude Code](https://claude.com/claude-code), Anthropic's AI coding tool.
+  Features and behavior may change without notice, and updates will keep coming.
 - Tested on macOS (Apple silicon) with Ollama 0.32 and 0.34. Windows (with PowerShell as the shell) is supported by design but untested.
 - **UI language: English, Japanese or Simplified Chinese.** The GUI starts in the browser's language (which follows the OS
   unless you changed it), or in English when that is none of these; switch it under "Language" in the left panel.
@@ -28,8 +30,8 @@ files and run commands. Everything stays on your machine, unless you turn web se
 ## Usage
 
 ```sh
-git clone https://github.com/moooyooo/local-llm-harness.git
-cd local-llm-harness
+git clone https://github.com/moooyooo/moooyooo-local-llm-harness.git
+cd moooyooo-local-llm-harness
 npm install
 npm run dev        # development: http://localhost:38722
 # or
@@ -63,7 +65,7 @@ Check **Web search (SearXNG)** in the left panel to let that tab's model use Web
 | Unregister (also stops production) | `scripts/mac/autostart.sh uninstall` |
 | Start if needed and open in the browser | `scripts/mac/start-harness.sh` |
 
-- A LaunchAgent (`~/Library/LaunchAgents/com.moooyooo.custom-harnes-local-llm.plist`) starts http://localhost:38720 at login and restarts it if it crashes.
+- A LaunchAgent (`~/Library/LaunchAgents/com.moooyooo.local-llm-harness.plist`) starts http://localhost:38720 at login and restarts it if it crashes.
   macOS reports a new background item the first time; turn it off under System Settings > General > Login Items to stop it from starting.
 - So that the agent can run git, npm, docker and so on, `install` captures the PATH, SHELL and LANG of the terminal it runs in.
   Run `install` again after installing new commands, moving the folder or reinstalling node.
@@ -94,7 +96,6 @@ For local LLMs:
 
 - **English, Japanese and Simplified Chinese UI**: picked from the browser's language (English otherwise) and switchable in
   the left panel. Saved history is shown in the chosen language too
-
 - **Model picker** listing installed models with their tool / thinking / vision support, size and maximum context length
 - **Thinking** (default / on / off / low · medium · high) and **context length** (`num_ctx`)
 - **Context usage meter and generation speed** (tok/s)
@@ -142,7 +143,7 @@ For local LLMs:
 | `PORT` | production `38720` / development `38721` | Server port (defaults in `shared/ports.ts`) |
 | `HARNESS_CWD` | the folder the server starts in | Default working folder |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama URL |
-| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | Session history (`sessions/<id>.jsonl`), checkpoints (`checkpoints/`, unused ones deleted after 30 days) and SearXNG settings (`searxng/`) |
+| `HARNESS_DATA_DIR` | `~/.moooyooo-local-llm-harness` | Session history (`sessions/<id>.jsonl`), checkpoints (`checkpoints/`, unused ones deleted after 30 days) and SearXNG settings (`searxng/`) |
 | `SEARXNG_URL` | `http://127.0.0.1:38730` | SearXNG used by WebSearch |
 | `HARNESS_FEATURES` | none | Experimental switches to turn on, comma-separated, or `all` (see below) |
 
@@ -197,6 +198,13 @@ A new message goes into `ja.ts` first and then into every other catalog (`npm ru
 
 The server sends messages as keys with values rather than finished sentences, so saved history is shown in the current
 language too. Output meant for whoever runs the harness (server logs, `scripts/`) is not translated yet.
+
+## Disclaimer
+
+This software is provided "as is" under the [MIT License](LICENSE), without warranty of any kind, express or implied.
+It edits files and runs commands at the direction of a local LLM, which can lose data or break things on your machine:
+back up what matters, and check what you allow. To the extent permitted by law, the author is not liable for any damages
+arising from its use.
 
 ## License
 

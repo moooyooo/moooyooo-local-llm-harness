@@ -1,9 +1,11 @@
-# Local LLM Harness (local-llm-harness)
+# moooyooo Local LLM Harness (moooyooo-local-llm-harness)
 
 A local web GUI coding-agent harness for local LLMs served by Ollama. The UX follows custom-harnes, the author's private
 web GUI for the Claude Code CLI, but instead of driving a CLI, the server runs its own agent loop against Ollama's `/api/chat`.
-Internal names (the `~/.custom-harnes-local` data folder, the settings key in localStorage, the LaunchAgent label, the app
-name in `/api/health`) keep the old `custom-harnes-local` spelling so existing installs keep working.
+Internal names follow the app's name too: the `~/.moooyooo-local-llm-harness` data folder, the localStorage keys, the
+LaunchAgent label `com.moooyooo.local-llm-harness`, the app name in `/api/health`, the SearXNG container. Until 2026-09 they
+were `custom-harnes-local…`; the GUI still reads settings saved under the old localStorage keys (`OLD_KEYS` in App.tsx).
+The local folder may still be called `custom-harnes-local-llm`.
 READMEs: `README.md` (English) and `README.ja.md` (Japanese); keep them in step.
 It is for personal, local use only: do not add features that expose it to other users or to the network.
 

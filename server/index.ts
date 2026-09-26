@@ -106,7 +106,7 @@ function checkImages(images: unknown): Text | undefined {
 
 const app = express();
 // Lets scripts/harness.mjs tell this server apart from another program on the port.
-app.get('/api/health', (_req, res) => res.json({ app: 'custom-harnes-local-llm', pid: process.pid, port: PORT, dev: DEV }));
+app.get('/api/health', (_req, res) => res.json({ app: 'moooyooo-local-llm-harness', pid: process.pid, port: PORT, dev: DEV }));
 if (!DEV && existsSync(DIST)) {
   app.use(express.static(DIST));
   app.get('/{*path}', (_req, res) => res.sendFile(path.join(DIST, 'index.html')));
@@ -348,7 +348,7 @@ function isValidKey(key: unknown): key is string {
 }
 
 server.listen(PORT, HOST, () => {
-  console.log(`custom-harnes-local-llm ${DEV ? 'dev API' : 'server'}: http://localhost:${PORT}`);
+  console.log(`moooyooo-local-llm-harness ${DEV ? 'dev API' : 'server'}: http://localhost:${PORT}`);
   if (DEV) console.log(`GUI (Vite): http://localhost:${DEV_WEB_PORT}`);
   console.log(`Ollama: ${OLLAMA_URL}`);
   console.log(`実験的な機能: ${describeFeatures(FEATURES)}`);

@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LOG = path.join(ROOT, 'logs', 'harness.log');
 const PROD_DIST = 'dist-prod';
-const APP = 'custom-harnes-local-llm';
+const APP = 'moooyooo-local-llm-harness';
 const [command = 'status', ...flags] = process.argv.slice(2);
 
 const stamp = () => new Date().toLocaleString('sv-SE');

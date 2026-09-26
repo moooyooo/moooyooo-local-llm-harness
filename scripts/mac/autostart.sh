@@ -12,7 +12,7 @@
 # of the shell that runs install, minus what npm adds while running a script.
 set -eu
 
-LABEL=com.moooyooo.custom-harnes-local-llm
+LABEL=com.moooyooo.local-llm-harness
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"

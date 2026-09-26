@@ -10,7 +10,7 @@ import type { OllamaMessage } from './ollama.js';
  * conversation goes. `message` records are exactly what is sent to Ollama, so a session resumes as-is.
  */
 
-export const DATA_DIR = process.env.HARNESS_DATA_DIR ?? path.join(os.homedir(), '.custom-harnes-local');
+export const DATA_DIR = process.env.HARNESS_DATA_DIR ?? path.join(os.homedir(), '.moooyooo-local-llm-harness');
 export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PROMPT_PREVIEW = 200;
 const HISTORY_LIMIT = 600;

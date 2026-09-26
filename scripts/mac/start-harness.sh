@@ -3,7 +3,7 @@
 # With the login agent installed (autostart.sh install), launchd runs it; otherwise it starts in the background.
 set -eu
 
-LABEL=com.moooyooo.custom-harnes-local-llm
+LABEL=com.moooyooo.local-llm-harness
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 
 if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then

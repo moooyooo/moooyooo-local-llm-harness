@@ -50,7 +50,7 @@ export interface RestoreResult {
 const GITCONFIG = `# Used only by the harness's checkpoint repositories (GIT_CONFIG_GLOBAL), so the user's own git settings,
 # such as signing or line-ending conversion, don't apply to them.
 [user]
-\tname = Local LLM Harness
+\tname = moooyooo Local LLM Harness
 \temail = checkpoints@localhost
 [core]
 \tautocrlf = false

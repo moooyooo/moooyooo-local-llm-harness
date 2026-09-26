@@ -35,10 +35,16 @@ const PERMISSION_MODES: { value: PermissionMode; label: MessageKey }[] = [
   { value: 'plan', label: 'app.mode.plan' },
   { value: 'bypassPermissions', label: 'app.mode.bypassPermissions' },
 ];
-const SETTINGS_KEY = 'custom-harnes-local.settings';
+const SETTINGS_KEY = 'moooyooo-local-llm-harness.settings';
 /** Open tabs, so a reloaded page shows the sessions that kept running on the server. */
-const TABS_KEY = 'custom-harnes-local.tabs';
-const APP_TITLE = 'Local LLM Harness';
+const TABS_KEY = 'moooyooo-local-llm-harness.tabs';
+/** Where versions before the rename (2026-09) saved them; read while nothing is saved under the new keys. */
+const OLD_KEYS: Record<string, string> = { [SETTINGS_KEY]: 'custom-harnes-local.settings', [TABS_KEY]: 'custom-harnes-local.tabs' };
+const APP_TITLE = 'moooyooo Local LLM Harness';
+
+function readSaved(key: string): string | null {
+  return localStorage.getItem(key) ?? localStorage.getItem(OLD_KEYS[key]);
+}
 
 interface Settings {
   model?: string;
@@ -60,7 +66,7 @@ interface Settings {
 
 function loadSettings(): Settings {
   try {
-    return JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
+    return JSON.parse(readSaved(SETTINGS_KEY) ?? '{}');
   } catch {
     return {};
   }
@@ -68,7 +74,7 @@ function loadSettings(): Settings {
 
 function loadTabs(): SavedTabs | undefined {
   try {
-    const saved = JSON.parse(localStorage.getItem(TABS_KEY) ?? 'null') as SavedTabs | null;
+    const saved = JSON.parse(readSaved(TABS_KEY) ?? 'null') as SavedTabs | null;
     return Array.isArray(saved?.tabs) ? { ...saved, tabs: saved.tabs.filter((tb) => typeof tb?.key === 'string' && typeof tb.cwd === 'string') } : undefined;
   } catch {
     return undefined;

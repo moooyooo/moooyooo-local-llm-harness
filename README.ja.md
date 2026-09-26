@@ -1,8 +1,8 @@
-# Local LLM Harness
+# moooyooo Local LLM Harness
 
 [English](README.md) | 日本語
 
-[![CI](https://github.com/moooyooo/local-llm-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/moooyooo/local-llm-harness/actions/workflows/ci.yml)
+[![CI](https://github.com/moooyooo/moooyooo-local-llm-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/moooyooo/moooyooo-local-llm-harness/actions/workflows/ci.yml)
 
 **Ollama のローカル LLM** をコーディングエージェントとして動かす、ローカル専用の Web GUI ハーネスです。
 操作感は、作者が作った Claude Code 用の Web GUI ハーネス（非公開）にそろえています。
@@ -10,6 +10,8 @@
 Claude Code CLI の代わりに、サーバー内の自前のエージェントループが Ollama の `/api/chat`（ツール呼び出し）を使い、
 ファイルの読み書きやコマンド実行を行います。通信はこの PC の中で完結します（Web 検索を ON にしたときを除く）。
 
+- **開発途中です。** [Claude Code](https://claude.com/claude-code)（Anthropic の AI コーディングツール）を使って開発しています。
+  機能や動作は予告なく変わることがあり、今後も随時更新します
 - 動作確認: macOS（Apple シリコン）、Ollama 0.32・0.34。Windows（シェルは PowerShell）でも動くように作っていますが、未確認です
 - **画面の言語は日本語・英語・中国語（簡体字）です。** 最初はブラウザの言語（変えていなければ OS の言語）で表示し、
   そのどれでもなければ英語で表示します。左パネルの「表示言語」で切り替えられます。
@@ -28,8 +30,8 @@ Claude Code CLI の代わりに、サーバー内の自前のエージェント�
 ## 使い方
 
 ```sh
-git clone https://github.com/moooyooo/local-llm-harness.git
-cd local-llm-harness
+git clone https://github.com/moooyooo/moooyooo-local-llm-harness.git
+cd moooyooo-local-llm-harness
 npm install
 npm run dev        # 開発: http://localhost:38722
 # または
@@ -63,7 +65,7 @@ npm run searxng -- stop        # 停止（status で状態確認）
 | 登録を解除（本番も停止） | `scripts/mac/autostart.sh uninstall` |
 | 起動してブラウザで開く | `scripts/mac/start-harness.sh` |
 
-- LaunchAgent（`~/Library/LaunchAgents/com.moooyooo.custom-harnes-local-llm.plist`）で、ログイン時に http://localhost:38720 を起動し、落ちても自動で再起動します。
+- LaunchAgent（`~/Library/LaunchAgents/com.moooyooo.local-llm-harness.plist`）で、ログイン時に http://localhost:38720 を起動し、落ちても自動で再起動します。
   初回は macOS から「バックグラウンド項目が追加されました」と通知されます。「システム設定 > 一般 > ログイン項目」でオフにすると起動しません。
 - エージェントが git・npm・docker などを使えるよう、`install` を実行したターミナルの PATH・SHELL・LANG を引き継ぎます。
   コマンドを新しく入れたとき、フォルダを移動したとき、node を入れ直したときは `install` をやり直してください。
@@ -94,7 +96,6 @@ npm run searxng -- stop        # 停止（status で状態確認）
 
 - **日本語・英語・中国語（簡体字）の画面**：ブラウザの言語に合わせて選び（どれでもなければ英語）、左パネルで切り替えられる。
   保存した履歴も選んだ言語で表示する
-
 - **モデル選択**：インストール済みのモデルを一覧表示し、ツール / 思考 / 画像の対応、サイズ、最大コンテキスト長を表示する
 - **思考の切り替え**（既定 / オン / オフ / low・medium・high）と**コンテキスト長**（`num_ctx`）の指定
 - **コンテキスト使用率のメーターと生成速度（tok/s）**
@@ -140,7 +141,7 @@ npm run searxng -- stop        # 停止（status で状態確認）
 | `PORT` | 本番 `38720` / 開発 `38721` | サーバーのポート（既定値は `shared/ports.ts`） |
 | `HARNESS_CWD` | サーバー起動時のフォルダ | 作業フォルダの既定値 |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama の URL |
-| `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | セッション履歴（`sessions/<id>.jsonl`）、チェックポイント（`checkpoints/`。30 日使われないものは削除）、SearXNG の設定（`searxng/`）の保存先 |
+| `HARNESS_DATA_DIR` | `~/.moooyooo-local-llm-harness` | セッション履歴（`sessions/<id>.jsonl`）、チェックポイント（`checkpoints/`。30 日使われないものは削除）、SearXNG の設定（`searxng/`）の保存先 |
 | `SEARXNG_URL` | `http://127.0.0.1:38730` | WebSearch が使う SearXNG の URL |
 | `HARNESS_FEATURES` | なし | オンにする実験的な切り替え（カンマ区切り、または `all`。下記） |
 
@@ -194,6 +195,13 @@ npm run searxng -- stop        # 停止（status で状態確認）
 
 サーバーは完成した文ではなく「キーと値」を送るので、保存した履歴も今の言語で表示されます。
 動かす人向けの出力（サーバーのログ、`scripts/`）は、まだ翻訳の対象外です。
+
+## 免責事項
+
+本ソフトウェアは [MIT ライセンス](LICENSE) のもと「現状のまま」提供され、明示・黙示を問わず、いかなる保証もしません。
+本ソフトウェアはローカル LLM の指示でファイルの編集やコマンドの実行を行うため、データの消失やシステムの不具合が起きる可能性があります。
+大切なデータはバックアップを取り、内容を確かめてから許可してください。
+本ソフトウェアの使用によって生じたいかなる損害についても、作者は、法令で認められる範囲において責任を負いません。
 
 ## ライセンス
 

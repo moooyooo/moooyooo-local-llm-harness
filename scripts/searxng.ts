@@ -9,13 +9,13 @@ import path from 'node:path';
 import { SEARXNG_PORT } from '../shared/ports.js';
 import { DATA_DIR } from '../server/store.js';
 
-const NAME = 'custom-harnes-searxng';
+const NAME = 'moooyooo-local-llm-harness-searxng';
 const IMAGE = 'docker.io/searxng/searxng:latest';
 const DIR = path.join(DATA_DIR, 'searxng');
 const URL = `http://127.0.0.1:${SEARXNG_PORT}`;
 
 // Private use: JSON output for the harness, no bot limiter (it would block the harness's requests).
-const SETTINGS = (secret: string) => `# Written by custom-harnes-local-llm (scripts/searxng.ts). See https://docs.searxng.org/admin/settings/
+const SETTINGS = (secret: string) => `# Written by moooyooo-local-llm-harness (scripts/searxng.ts). See https://docs.searxng.org/admin/settings/
 use_default_settings: true
 server:
   secret_key: "${secret}"
