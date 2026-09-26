@@ -140,6 +140,21 @@ npm run searxng -- stop        # 停止（status で状態確認）
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama の URL |
 | `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | セッション履歴（`sessions/<id>.jsonl`）、チェックポイント（`checkpoints/`。30 日使われないものは削除）、SearXNG の設定（`searxng/`）の保存先 |
 | `SEARXNG_URL` | `http://127.0.0.1:38730` | WebSearch が使う SearXNG の URL |
+| `HARNESS_FEATURES` | なし | オンにする実験的な切り替え（カンマ区切り、または `all`。下記） |
+
+### 実験的な切り替え
+
+ローカルモデルに長い作業をやり切らせるための変更です。効果が測定（`scripts/eval`）で確かめられるまで、既定ではオフにしています。
+`HARNESS_FEATURES` でオンにします（例: `HARNESS_FEATURES=fuzzyEdit,todoList npm start`）。
+
+| 名前 | 内容 |
+| --- | --- |
+| `fuzzyEdit` | Edit の `old_string` がファイルと空白やインデントだけ違う場合、一致する箇所が 1 か所だけなら置換する。どこにも一致しなければ、いちばん似た行を示す |
+| `failureAdvice` | ツールの失敗が続いたときや、同じファイルの Edit が何度も失敗したときに、考え直すよう結果に添える |
+| `loopDetection` | 同じ内容を繰り返し出力し始めたら止めて、1 回だけ再依頼する |
+| `outputLimit` | 1 回の出力をコンテキストの残りまでに制限する（超えると Ollama は会話の先頭から黙って捨てるため）。思考ありのときは 65% で圧縮する |
+| `trimOutputs` | 要約の前に、古いツール出力を短い案内に置き換える |
+| `todoList` | モデルに作業の手順をチェックリスト（TodoWrite。左パネルに表示）で管理させ、ツール 10 回ごとに見せ直し、未完了のまま終えようとしたら 1 回だけ促す |
 
 ## ヒント
 

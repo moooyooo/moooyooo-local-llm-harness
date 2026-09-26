@@ -11,6 +11,7 @@ import { MAX_IMAGE_BASE64, MAX_IMAGES } from '../shared/protocol.js';
 import type { ClientMessage, PermissionMode, ServerMessage, SessionSettings, ThinkSetting } from '../shared/protocol.js';
 import { AgentSession, type AgentConfig } from './agent.js';
 import { CheckpointStore } from './checkpoints.js';
+import { describeFeatures, parseFeatures } from './features.js';
 import { chat, describeError, getStatus, listLoaded, listModels, modelCapabilities, OLLAMA_URL, unloadModel } from './ollama.js';
 import { checkpointsOf, DATA_DIR, listFolders, SessionStore, toEvents, toMessages } from './store.js';
 import { SEARXNG_URL, searxngReachable } from './web.js';
@@ -34,6 +35,9 @@ const THINK_SETTINGS = new Set<ThinkSetting>(['', 'on', 'off', 'low', 'medium', 
 const ALLOWED_ORIGINS = new Set(
   (DEV ? [DEV_WEB_PORT] : [PORT]).flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]),
 );
+
+/** Experimental changes to turn on for every session, e.g. HARNESS_FEATURES=fuzzyEdit,trimOutputs (server/features.ts). */
+const FEATURES = parseFeatures(process.env.HARNESS_FEATURES);
 
 const store = new SessionStore();
 const checkpoints = new CheckpointStore();
@@ -199,6 +203,7 @@ wss.on('connection', (ws: WebSocket) => {
         ...settings,
         history: records ? toMessages(records) : undefined,
         checkpoints: records ? checkpointsOf(records) : undefined,
+        features: FEATURES,
       },
       {
         chat,
@@ -346,6 +351,7 @@ server.listen(PORT, HOST, () => {
   console.log(`custom-harnes-local-llm ${DEV ? 'dev API' : 'server'}: http://localhost:${PORT}`);
   if (DEV) console.log(`GUI (Vite): http://localhost:${DEV_WEB_PORT}`);
   console.log(`Ollama: ${OLLAMA_URL}`);
+  console.log(`実験的な機能: ${describeFeatures(FEATURES)}`);
   console.log(`セッションの保存先: ${store.dir}`);
 });
 server.on('error', (err: NodeJS.ErrnoException) => {

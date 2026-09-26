@@ -144,7 +144,17 @@ export type AgentEvent =
    * Older messages being replaced by a summary, automatically near the context limit or on request.
    * Token counts are estimates of the prompt size.
    */
-  | { type: 'compact'; phase: 'start' | 'done' | 'failed'; auto: boolean; summary?: string; tokensBefore?: number; tokensAfter?: number; message?: Text }
+  | {
+      type: 'compact';
+      phase: 'start' | 'done' | 'failed';
+      auto: boolean;
+      summary?: string;
+      tokensBefore?: number;
+      tokensAfter?: number;
+      /** Old tool outputs replaced with a note (without a summary when `summary` is empty). */
+      trimmed?: number;
+      message?: Text;
+    }
   /** A finished assistant message. Replaces the streamed deltas. */
   | { type: 'assistant'; text: string; thinking?: string; toolCalls: ToolCall[] }
   | { type: 'toolResult'; id: string; output: string; isError: boolean }

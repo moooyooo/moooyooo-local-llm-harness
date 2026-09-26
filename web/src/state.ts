@@ -55,7 +55,7 @@ export type Item =
   /** Kept as `Text`, so it follows the language when that changes. */
   | { kind: 'notice'; id: string; level: 'info' | 'error'; text: Text }
   /** Older messages were replaced by this summary (estimated prompt tokens before → after). */
-  | { kind: 'compact'; id: string; auto: boolean; summary: string; tokensBefore?: number; tokensAfter?: number }
+  | { kind: 'compact'; id: string; auto: boolean; summary: string; tokensBefore?: number; tokensAfter?: number; trimmed?: number }
   /** The working folder's files were recorded; they can be put back to this point. `at`: ISO time. */
   | { kind: 'checkpoint'; id: string; commit: string; n: number; reason: CheckpointReason; changed: number; at: string; excluded?: string[] };
 
@@ -352,9 +352,9 @@ function onEvent(tab: Tab, ev: AgentEvent): Tab {
         const reason = ev.message ?? text('common.unknownError');
         return pushItems(next, { kind: 'notice', id: nextId(), level: 'error', text: text('transcript.compactFailed', { reason }) });
       }
-      const { auto, tokensBefore, tokensAfter } = ev;
+      const { auto, tokensBefore, tokensAfter, trimmed } = ev;
       return {
-        ...pushItems(next, { kind: 'compact', id: nextId(), auto, summary: ev.summary ?? '', tokensBefore, tokensAfter }),
+        ...pushItems(next, { kind: 'compact', id: nextId(), auto, summary: ev.summary ?? '', tokensBefore, tokensAfter, trimmed }),
         stats: next.stats && tokensAfter != null ? { ...next.stats, contextUsed: tokensAfter } : next.stats,
       };
     }

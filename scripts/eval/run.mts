@@ -7,7 +7,9 @@
  * runner measures any version of it.
  *
  * tsx run.mts --harness DIR --out DIR --label NAME --model MODEL [--ctx N] [--think T] [--runs K]
- *             [--timeout-min M] [--continues C] TASK...
+ *             [--timeout-min M] [--continues C] [--features a,b|all|none] TASK...
+ *
+ * --features turns on experimental changes of the harness (server/features.ts; ignored by versions without it).
  */
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -29,6 +31,7 @@ const { values: opt, positionals: tasks } = parseArgs({
     runs: { type: 'string', default: '1' },
     'timeout-min': { type: 'string', default: '25' },
     continues: { type: 'string', default: '2' },
+    features: { type: 'string', default: 'none' },
   },
 });
 if (!opt.harness || !opt.out || !opt.label || !opt.model || !tasks.length) {
@@ -45,6 +48,7 @@ const checkpoints = existsSync(path.join(harness, 'server/checkpoints.ts'))
   ? new (await load('server/checkpoints.ts')).CheckpointStore(path.join(opt.out, opt.label, 'data'))
   : undefined;
 const { msg, textOf } = await load('shared/i18n/index.ts');
+const features = existsSync(path.join(harness, 'server/features.ts')) ? (await load('server/features.ts')).parseFeatures(opt.features) : undefined;
 /** What the GUI's 「続きから再開」 button sends. */
 const CONTINUE = textOf('ja', msg('transcript.continuePrompt'));
 
@@ -86,7 +90,7 @@ async function runOnce(task: string, dir: string, prompt: string, run: number) {
   };
   const sessionId = randomUUID();
   const s = new AgentSession(
-    { sessionId, cwd, model, think: opt.think, numCtx, permissionMode: 'bypassPermissions', capabilities },
+    { sessionId, cwd, model, think: opt.think, numCtx, permissionMode: 'bypassPermissions', capabilities, features },
     {
       chat,
       store,
@@ -156,6 +160,7 @@ async function runOnce(task: string, dir: string, prompt: string, run: number) {
     model,
     ctx: numCtx,
     think: opt.think,
+    features: opt.features,
     pass: check.status === 0,
     check: `${check.stdout ?? ''}${check.stderr ?? ''}`.trim().split('\n').slice(-6).join('\n'),
     durationMs: Date.now() - started,

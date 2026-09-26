@@ -9,8 +9,8 @@ import { SHELL_TOOL } from './tools.js';
 const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md'];
 const MAX_INSTRUCTIONS_CHARS = 16_000;
 
-export function buildSystemPrompt(opts: { cwd: string; permissionMode: PermissionMode; tools: boolean; web?: boolean }): string {
-  const { cwd, permissionMode, tools, web } = opts;
+export function buildSystemPrompt(opts: { cwd: string; permissionMode: PermissionMode; tools: boolean; web?: boolean; todos?: boolean }): string {
+  const { cwd, permissionMode, tools, web, todos } = opts;
   const parts = [
     'You are a coding agent running in "Local LLM Harness", a GUI on the user\'s own computer. ' +
       'You help the user with software engineering tasks in their working folder' + (tools ? ' by using the provided tools.' : '.'),
@@ -35,6 +35,7 @@ export function buildSystemPrompt(opts: { cwd: string; permissionMode: Permissio
         `Each ${SHELL_TOOL} call starts in the working folder; cd does not carry over. Do not run interactive programs or servers that never exit.`,
         'Some tool calls need the user\'s permission. If a call is denied, do not repeat it; change your approach or ask the user.',
         'Work step by step and check each tool result before continuing. After changing code, run the relevant build or tests when there are any.',
+        ...(todos ? ['For a task with several steps, make a checklist with TodoWrite first and keep it up to date, so no step is forgotten.'] : []),
         'When the task is done, stop calling tools and reply with a short summary of what you did.',
         'Be concise. Use Markdown. Never print or commit secrets such as API keys.',
       ]),

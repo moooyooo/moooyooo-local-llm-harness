@@ -142,6 +142,21 @@ For local LLMs:
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama URL |
 | `HARNESS_DATA_DIR` | `~/.custom-harnes-local` | Session history (`sessions/<id>.jsonl`), checkpoints (`checkpoints/`, unused ones deleted after 30 days) and SearXNG settings (`searxng/`) |
 | `SEARXNG_URL` | `http://127.0.0.1:38730` | SearXNG used by WebSearch |
+| `HARNESS_FEATURES` | none | Experimental switches to turn on, comma-separated, or `all` (see below) |
+
+### Experimental switches
+
+Changes meant to help local models finish long tasks, off until measurements show they help (`scripts/eval`).
+Turn them on with `HARNESS_FEATURES`, e.g. `HARNESS_FEATURES=fuzzyEdit,todoList npm start`.
+
+| Switch | What it does |
+| --- | --- |
+| `fuzzyEdit` | An Edit whose `old_string` differs from the file only in whitespace or indentation is applied when it matches one place only; when nothing matches, the most similar lines are shown |
+| `failureAdvice` | After several failed tool calls in a row, or repeated failed Edits of one file, the tool result asks the model to rethink |
+| `loopDetection` | A reply stuck repeating the same passage is stopped and retried once |
+| `outputLimit` | Each reply is capped at what the context window has left (past it, Ollama silently drops the start of the conversation); with thinking on, compaction starts at 65% of the window |
+| `trimOutputs` | Before summarizing, old tool outputs are replaced with a short note |
+| `todoList` | The model keeps a checklist of the task's steps (TodoWrite, shown beside the session), sees it again every 10 tool calls, and gets one reminder when it stops with items left |
 
 ## Tips
 

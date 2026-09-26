@@ -4,6 +4,8 @@ import { glob, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promise
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_LOCALE, textOf } from '../shared/i18n/index.js';
+import { parseTodos } from '../shared/todos.js';
+import { closestLines, fuzzyMatch } from './editMatch.js';
 import type { OllamaTool } from './ollama.js';
 import { findSecret } from './secretScan.js';
 import { checkUrl, PAGE_CHARS, webFetch, webSearch } from './web.js';
@@ -18,6 +20,8 @@ export interface ToolContext {
   signal: AbortSignal;
   /** Absolute paths read in this session. Edit, and Write over an existing file, need a prior Read. */
   readFiles: Set<string>;
+  /** Recover Edits whose old_string differs only in whitespace (the `fuzzyEdit` feature, server/features.ts). */
+  fuzzyEdit?: boolean;
 }
 
 /** Thrown for failures the model should see as a tool error (bad input, file not found, ...). */
@@ -149,15 +153,29 @@ async function prepareEdit(input: Record<string, unknown>, ctx: ToolContext) {
     oldStr = oldStr.replace(/\r?\n/g, '\r\n');
     newStr = newStr.replace(/\r?\n/g, '\r\n');
   }
-  const count = text.split(oldStr).length - 1;
+  let count = text.split(oldStr).length - 1;
+  let note: string | undefined;
   if (count === 0) {
-    throw new ToolError('old_string was not found in the file. It must match exactly, including whitespace and indentation. Read the file again to check.');
+    if (!ctx.fuzzyEdit) {
+      throw new ToolError('old_string was not found in the file. It must match exactly, including whitespace and indentation. Read the file again to check.');
+    }
+    // Local models often get whitespace wrong; a unique match that ignores it is safe to use.
+    const fuzzy = fuzzyMatch(text, oldStr, newStr);
+    if (!fuzzy) {
+      const near = closestLines(text, oldStr);
+      throw new ToolError(
+        'old_string was not found in the file. It must match exactly, including whitespace and indentation. ' +
+          (near ? `The most similar lines are ${near.from}-${near.to}:\n${numbered(near.lines, near.from)}\nCopy the text to replace from there.` : 'Read the file again to check.'),
+      );
+    }
+    ({ oldStr, newStr, note } = fuzzy);
+    count = 1;
   }
   const all = input.replace_all === true || input.replace_all === 'true';
   if (count > 1 && !all) {
     throw new ToolError(`old_string appears ${count} times. Add surrounding lines to make it unique, or set replace_all to true.`);
   }
-  return { abs, text, oldStr, newStr, count, all };
+  return { abs, text, oldStr, newStr, count, all, note };
 }
 
 const TOOLS: Record<string, ToolDef> = {
@@ -233,7 +251,7 @@ const TOOLS: Record<string, ToolDef> = {
     },
     validate: (input, ctx) => prepareEdit(input, ctx),
     async run(input, ctx) {
-      const { abs, text, oldStr, newStr, count, all } = await prepareEdit(input, ctx);
+      const { abs, text, oldStr, newStr, count, all, note } = await prepareEdit(input, ctx);
       const at = text.indexOf(oldStr);
       const next = all ? text.split(oldStr).join(newStr) : text.slice(0, at) + newStr + text.slice(at + oldStr.length);
       await writeFile(abs, next, 'utf8');
@@ -244,7 +262,8 @@ const TOOLS: Record<string, ToolDef> = {
       const changed = newStr.split('\n').length;
       const from = Math.max(1, first - 3);
       const to = Math.min(lines.length, first + changed + 2);
-      return `Edited ${display(abs, ctx.cwd)} (${all ? count : 1} replacement${(all ? count : 1) > 1 ? 's' : ''}). Snippet:\n${numbered(lines.slice(from - 1, to), from)}`;
+      const done = `Edited ${display(abs, ctx.cwd)} (${all ? count : 1} replacement${(all ? count : 1) > 1 ? 's' : ''}). Snippet:\n${numbered(lines.slice(from - 1, to), from)}`;
+      return note ? `Note: ${note}.\n${done}` : done;
     },
   },
 
@@ -357,6 +376,33 @@ const TOOLS: Record<string, ToolDef> = {
     },
   },
 
+  TodoWrite: {
+    readOnly: true,
+    description:
+      'Keep a checklist for a task with several steps. Send the whole list every time: mark the item you are working on ' +
+      'in_progress, and each item completed as soon as it is done.',
+    parameters: {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { content: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] } },
+            required: ['content', 'status'],
+          },
+        },
+      },
+      required: ['todos'],
+    },
+    async run(input) {
+      const parsed = parseTodos(input.todos);
+      if ('error' in parsed) throw new ToolError(parsed.error);
+      const done = parsed.todos.filter((t) => t.status === 'completed').length;
+      return `Todo list saved: ${done} of ${parsed.todos.length} done.`;
+    },
+  },
+
   WebSearch: {
     readOnly: true,
     web: true,
@@ -398,10 +444,13 @@ const TOOLS: Record<string, ToolDef> = {
 
 export const TOOL_NAMES = Object.keys(TOOLS);
 
-/** Tool definitions for `/api/chat`. Plan mode offers only read-only tools; web tools only with web access on. */
-export function toolSchemas(readOnlyOnly: boolean, web = false): OllamaTool[] {
+/**
+ * Tool definitions for `/api/chat`. Plan mode offers only read-only tools; web tools only with web access on;
+ * TodoWrite only with the `todoList` feature.
+ */
+export function toolSchemas(readOnlyOnly: boolean, web = false, todo = false): OllamaTool[] {
   return Object.entries(TOOLS)
-    .filter(([, t]) => (!readOnlyOnly || t.readOnly) && (web || !t.web))
+    .filter(([name, t]) => (!readOnlyOnly || t.readOnly) && (web || !t.web) && (todo || name !== 'TodoWrite'))
     .map(([name, t]) => ({ type: 'function', function: { name, description: t.description, parameters: t.parameters } }));
 }
 

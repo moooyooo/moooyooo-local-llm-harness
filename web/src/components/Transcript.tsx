@@ -144,6 +144,20 @@ function ItemView({ item, onPermission }: { item: Exclude<Item, { kind: 'checkpo
     case 'notice':
       return <div className={`notice ${item.level}`}>{tx(item.text)}</div>;
     case 'compact':
+      // Old tool outputs were dropped, with no summary to show.
+      if (item.trimmed && !item.summary) {
+        return (
+          <div className="notice info">
+            {t('transcript.trimmed', {
+              count: item.trimmed,
+              tokens:
+                item.tokensBefore != null && item.tokensAfter != null
+                  ? t('transcript.compactedTokens', { before: item.tokensBefore.toLocaleString(), after: item.tokensAfter.toLocaleString() })
+                  : '',
+            })}
+          </div>
+        );
+      }
       return (
         <details className="compaction">
           <summary>

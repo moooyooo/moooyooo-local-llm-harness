@@ -8,8 +8,17 @@ import type { OllamaMessage, OllamaTool } from './ollama.js';
 
 /** Compact when the next request is estimated to fill this share of the context window. */
 export const COMPACT_AT = 0.8;
+/** With thinking on, compact earlier: the thinking before a reply alone can take thousands of tokens. */
+export const COMPACT_AT_THINKING = 0.65;
 /** After compacting, the conversation should take about this share, so the next compaction is far off. */
 const TARGET_AFTER = 0.5;
+/**
+ * Before summarizing, long tool outputs outside the newest part are replaced with a note: they are most of what fills a
+ * coding conversation, and can be run again. When that alone gets below this share of the window, no summary is needed.
+ */
+export const TRIM_ENOUGH = 0.6;
+const TRIM_MIN_TOKENS = 200;
+export const TRIMMED_PREFIX = '[Output removed to save context';
 /** Room reserved for the summary when deciding how much to keep. */
 const SUMMARY_RESERVE = 2000;
 /** A manual compaction keeps at most this share of the current conversation. */
@@ -86,6 +95,21 @@ export function splitPoint(messages: OllamaMessage[], keepTokens: number): numbe
   }
   while (cut < messages.length && messages[cut].role === 'tool') cut++;
   return cut;
+}
+
+/**
+ * Replaces long tool outputs before `keepFrom` with a note that keeps their first line. Every call still has its result,
+ * and nothing the user or the model wrote changes.
+ */
+export function trimToolOutputs(messages: OllamaMessage[], keepFrom: number): { messages: OllamaMessage[]; trimmed: number } {
+  let trimmed = 0;
+  const out = messages.map((m, i) => {
+    if (i >= keepFrom || m.role !== 'tool' || m.content.startsWith(TRIMMED_PREFIX) || estimateTokens(m.content) < TRIM_MIN_TOKENS) return m;
+    trimmed++;
+    const first = m.content.trimStart().split('\n')[0].slice(0, 160);
+    return { ...m, content: `${TRIMMED_PREFIX}; run the ${m.tool_name ?? 'tool'} call again if you still need it. It began: ${first}]` };
+  });
+  return { messages: out, trimmed };
 }
 
 /**

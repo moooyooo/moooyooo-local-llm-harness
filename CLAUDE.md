@@ -24,11 +24,19 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
   that rebuilds the system prompt and writes a new `meta` record, which the history shows as a notice.
   Each model call is capped at `MAX_OUTPUT_TOKENS`; a reply cut off there is retried once with a request for smaller steps
   (a `message` record with `notice`, shown in the GUI as a notice instead of a user prompt).
+- `server/features.ts`: experimental changes to what the model sees, each off unless turned on (`HARNESS_FEATURES`, or
+  `--features` in scripts/eval) so it can be measured on its own before becoming the default: `fuzzyEdit`
+  (`server/editMatch.ts`), `failureAdvice` (`withAdvice`), `loopDetection` (`server/repetition.ts`), `outputLimit`
+  (`outputLimit`, `COMPACT_AT_THINKING`), `trimOutputs` (`trimToolOutputs`), `todoList` (TodoWrite, `shared/todos.ts`).
+  With all off, the agent behaves as before they existed; tests turn on the one they test.
 - `server/compact.ts`: context compaction. Before each model call the prompt size is estimated (Ollama's `prompt_eval_count`
   for the last call, which counts cached tokens too, plus estimates for messages added since); at `COMPACT_AT` of the window
   (the smaller of `num_ctx` and the loaded model's) older messages are replaced by a summary the model writes in a request
   shaped like the real ones (same tools and options, so the KV cache is reused). The latest user prompt is repeated word for
-  word, and `readFiles` is cleared so edits need a fresh Read. Also on demand (`compact` client message).
+  word, and `readFiles` is cleared so edits need a fresh Read. Also on demand (`compact` client message). With
+  `trimOutputs`, an automatic compaction first replaces long tool outputs outside the kept part (never the latest
+  calls' results) with a note (a `compact` record with `trimmed` and an empty summary); when that gets below
+  `TRIM_ENOUGH`, no summary is written.
   The system prompt is built once per session so Ollama can reuse its KV cache.
 - `server/ollama.ts`: REST client. Verified against Ollama 0.32 and 0.34: tool calls arrive whole (with an `id`) in one streamed chunk,
   and nothing is streamed while one is generated (minutes for a large Write), so `chat` uses `node:http` without a timeout
@@ -41,10 +49,14 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
   A loaded MLX (safetensors) model is reused whatever `num_ctx` a request asks for (GGUF models reload; see `needsReload`
   in Ollama's server/sched.go), so `AgentSession.ensureContext` frees a model loaded with a smaller window
   (`keep_alive: 0`, which lets a running request finish first) before calling it.
-- `server/tools.ts`: Read / Write / Edit / Bash (PowerShell on Windows) / Glob / Grep / LS. Names and parameters follow
-  Claude Code's tools so models use them naturally and `autoApprove.ts` classifies them unchanged. `validate` runs before
-  the permission prompt so the user isn't asked about calls that would fail anyway (e.g. Edit without a prior Read).
-  A path that doesn't exist gets the working folder and, if a file of that name is there, its path (`missingHint`).
+- `server/tools.ts`: Read / Write / Edit / Bash (PowerShell on Windows) / Glob / Grep / LS, and TodoWrite with `todoList`.
+  Names and parameters follow Claude Code's tools so models use them naturally and `autoApprove.ts` classifies them
+  unchanged. `validate` runs before the permission prompt so the user isn't asked about calls that would fail anyway
+  (e.g. Edit without a prior Read). A path that doesn't exist gets the working folder and, if a file of that name is
+  there, its path (`missingHint`).
+  With `fuzzyEdit`, an Edit whose old_string doesn't match exactly goes through `server/editMatch.ts`: a match ignoring
+  whitespace is used only if it is unique (new_string's indentation is corrected line by line; not with tabs);
+  otherwise the error shows the most similar lines.
 - `server/permissions.ts`: `gate()` decides allow / ask / deny per permission mode; `assess()` adds the classifier decision and,
   for git init/add/commit/push, the security scan. git init/add/commit/push always ask, even in `bypassPermissions`.
 - `server/autoApprove.ts`, `server/shellParse.ts`, `server/secretScan.ts`: taken from custom-harnes. Policy: allowlist only.

@@ -12,6 +12,8 @@ import {
   SUMMARY_PROMPT,
   summaryMessages,
   transcriptPieces,
+  trimToolOutputs,
+  TRIMMED_PREFIX,
 } from './compact.js';
 import type { OllamaMessage } from './ollama.js';
 
@@ -85,4 +87,19 @@ test('summary messages repeat the latest request and keep turns alternating', ()
 test('stray reasoning before </think> is removed from a summary', () => {
   assert.equal(cleanSummary('thinking...\n</think>\n\n## Task'), '## Task');
   assert.equal(cleanSummary('  ## Task  '), '## Task');
+});
+
+test('long tool outputs before the kept part are replaced with a note keeping their first line', () => {
+  const messages: OllamaMessage[] = [
+    { role: 'user', content: 'go' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'a', function: { name: 'Read', arguments: { file_path: 'x' } } }] },
+    { role: 'tool', content: `     1\tfirst line\n${'x'.repeat(3000)}`, tool_call_id: 'a', tool_name: 'Read' },
+    { role: 'tool', content: 'short', tool_call_id: 'b', tool_name: 'Bash' },
+    { role: 'tool', content: 'y'.repeat(3000), tool_call_id: 'c', tool_name: 'Bash' },
+  ];
+  const { messages: out, trimmed } = trimToolOutputs(messages, 4);
+  assert.equal(trimmed, 1);
+  assert.equal(out[2].content, `${TRIMMED_PREFIX}; run the Read call again if you still need it. It began: 1\tfirst line]`);
+  assert.deepEqual(out.slice(3), messages.slice(3), 'short outputs and the kept part stay');
+  assert.equal(trimToolOutputs(out, 4).trimmed, 0, 'a note is not trimmed again');
 });

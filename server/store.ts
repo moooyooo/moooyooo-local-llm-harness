@@ -39,7 +39,7 @@ export type SessionRecord =
    * The conversation was compacted: from here on it is `messages` (the summary and the messages kept as they were).
    * Earlier records stay in the file for the GUI's history.
    */
-  | { type: 'compact'; messages: OllamaMessage[]; summary: string; auto: boolean; tokensBefore: number; tokensAfter: number; timestamp: string }
+  | { type: 'compact'; messages: OllamaMessage[]; summary: string; auto: boolean; tokensBefore: number; tokensAfter: number; trimmed?: number; timestamp: string }
   /** The working folder's files were recorded in the checkpoint repository (see server/checkpoints.ts). */
   | { type: 'checkpoint'; commit: string; n: number; reason: CheckpointReason; changed: number; excluded?: string[]; timestamp: string };
 
@@ -195,8 +195,8 @@ export function toEvents(records: SessionRecord[]): { events: AgentEvent[]; omit
       events.push({ type: 'checkpoint', commit, n, reason, changed, at: timestamp, ...(excluded && { excluded }) });
     }
     if (r.type === 'compact') {
-      const { summary, auto, tokensBefore, tokensAfter } = r;
-      events.push({ type: 'compact', phase: 'done', summary, auto, tokensBefore, tokensAfter });
+      const { summary, auto, tokensBefore, tokensAfter, trimmed } = r;
+      events.push({ type: 'compact', phase: 'done', summary, auto, tokensBefore, tokensAfter, ...(trimmed && { trimmed }) });
     }
     if (r.type !== 'message') continue;
     const m = r.message;

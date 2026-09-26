@@ -7,8 +7,9 @@ import type { AgentEvent, PermissionMode } from '../shared/protocol.js';
 import { AgentSession, CHECKPOINT_EVERY, MAX_OUTPUT_TOKENS, RESTORED_HEADER, thinkParam, type AgentDeps } from './agent.js';
 import { CheckpointStore } from './checkpoints.js';
 import { msg, TextError, textOf, type Text } from '../shared/i18n/index.js';
-import { SUMMARY_HEADER, SUMMARY_PROMPT } from './compact.js';
+import { SUMMARY_HEADER, SUMMARY_PROMPT, TRIMMED_PREFIX } from './compact.js';
 import type { ChatFn, ChatRequest, ChatResult, OllamaMessage, OllamaToolCall } from './ollama.js';
+import type { Features } from './features.js';
 import { checkpointsOf, SessionStore, toEvents, toMessages } from './store.js';
 import { SHELL_TOOL } from './tools.js';
 
@@ -61,6 +62,7 @@ function session(
     history?: OllamaMessage[];
     checkpoints?: AgentDeps['checkpoints'];
     resumeCheckpoints?: { commit: string; n: number }[];
+    features?: Partial<Features>;
   },
 ) {
   const events: AgentEvent[] = [];
@@ -84,6 +86,7 @@ function session(
       capabilities: opts.caps ?? ['completion', 'tools'],
       history: opts.history,
       checkpoints: opts.resumeCheckpoints,
+      features: opts.features,
     },
     deps,
   );
@@ -115,6 +118,7 @@ test('plain answer: streams, commits the message and reports stats', async () =>
   assert.equal(requests[0].messages[0].role, 'system');
   assert.deepEqual(requests[0].messages[1], { role: 'user', content: 'hi' });
   assert.ok(requests[0].tools?.some((t) => t.function.name === SHELL_TOOL));
+  assert.ok(!requests[0].tools?.some((t) => t.function.name === 'TodoWrite'), 'experimental features are off by default');
 });
 
 test('read inside the working folder runs without a prompt, and its result goes back to the model', async () => {
@@ -273,7 +277,7 @@ test('a reply cut off at the output limit is retried once with a request for sma
   const store = new SessionStore(tmp());
   const cut = (): ChatResult => ({ ...reply(''), doneReason: 'length', evalCount: MAX_OUTPUT_TOKENS });
   const { chat, requests } = scripted(cut(), cut());
-  const { s, events } = session(chat, { cwd: tmp(), store });
+  const { s, events } = session(chat, { cwd: tmp(), store, loadedCtx: 131_072 });
   await s.sendUser('build the whole app');
 
   assert.equal(requests.length, 2);
@@ -608,4 +612,144 @@ test('no checkpoints in plan mode, and a failing checkpoint does not stop the ta
   assert.equal(attempts, 1, 'a permanent failure turns checkpoints off for the session');
   assert.deepEqual(events.filter((e) => e.type === 'notice').map((e) => e.type === 'notice' && ja(e.text)), ['このフォルダではチェックポイントを記録しません: git が見つかりません']);
   assert.equal(last(events, 'result')!.subtype, 'success');
+});
+
+/** A reply whose thinking streams one passage over and over, as a stuck model does, until the call is aborted. */
+const looping = (passage: string): ChatFn => async (_req, signal, cb) => {
+  for (let i = 0; i < 400; i++) {
+    if (signal.aborted) throw new Error('aborted');
+    cb.onThinking?.(passage);
+    await new Promise((r) => setImmediate(r));
+  }
+  return { ...reply('never'), thinking: passage.repeat(400) };
+};
+
+test('a reply stuck repeating itself is stopped and retried once, then the turn stops', async () => {
+  const passage = 'Hmm, wait. Let me reconsider whether the file needs a change before I call the Edit tool again. ';
+  const requests: ChatRequest[] = [];
+  const replies: ChatFn[] = [looping(passage), async () => reply('done'), looping(passage), looping(passage)];
+  const chat: ChatFn = (req, signal, cb) => {
+    requests.push(structuredClone(req));
+    return replies.shift()!(req, signal, cb);
+  };
+  const { s, events } = session(chat, { features: { loopDetection: true }, cwd: tmp() });
+  await s.sendUser('go');
+  const notice = events.find((e): e is Extract<AgentEvent, { type: 'notice' }> => e.type === 'notice')!;
+  assert.match(ja(notice.text), /繰り返し/);
+  const kept = events.find((e) => e.type === 'assistant')!;
+  assert.ok(kept.type === 'assistant' && kept.thinking!.length < passage.length * 3, 'only about one round of the loop is kept');
+  assert.equal(requests[1].messages.at(-1)!.role, 'user');
+  assert.match(requests[1].messages.at(-1)!.content, /kept repeating the same passage/);
+  assert.equal(last(events, 'result')!.subtype, 'success');
+  assert.equal(last(events, 'result')!.message, undefined);
+
+  await s.sendUser('again');
+  assert.match(ja(last(events, 'result')!.message!), /もう一度同じ内容の繰り返し/);
+});
+
+test('repeated failures get advice in the tool result, but a denial is not a failure', async () => {
+  const cwd = tmp();
+  writeFileSync(path.join(cwd, 'a.txt'), 'x\n');
+  const misses = Array.from({ length: 5 }, (_, i) => call(`r${i}`, 'Read', { file_path: `missing${i}.txt` }));
+  const edits = [
+    call('read', 'Read', { file_path: 'a.txt' }),
+    ...Array.from({ length: 3 }, (_, i) => call(`e${i}`, 'Edit', { file_path: 'a.txt', old_string: `nope${i}`, new_string: 'y' })),
+  ];
+  const { chat } = scripted(reply('', misses), reply('', edits), reply('done'));
+  const { s, events } = session(chat, { features: { failureAdvice: true }, cwd });
+  await s.sendUser('go');
+  const results = events.filter((e): e is Extract<AgentEvent, { type: 'toolResult' }> => e.type === 'toolResult');
+  assert.doesNotMatch(results[3].output, /in a row have failed/);
+  assert.match(results[4].output, /5 tool calls in a row have failed/);
+  assert.match(results.at(-1)!.output, /Edit on a.txt has failed 3 times/);
+
+  const denied = session(scripted(reply('', Array.from({ length: 6 }, (_, i) => call(`d${i}`, SHELL_TOOL, { command: `touch f${i}` }))), reply('ok')).chat, { features: { failureAdvice: true }, cwd });
+  denied.answerWith((sess, ev) => sess.respondPermission(ev.id, false));
+  await denied.s.sendUser('go');
+  assert.ok(!denied.events.some((e) => e.type === 'toolResult' && /in a row have failed/.test(e.output)));
+});
+
+test('the output limit stays within the window, and a cut-off while thinking asks for less thinking', async () => {
+  const cut: ChatResult = { ...reply(''), thinking: 'Let me think about everything first. ', doneReason: 'length' };
+  const { chat, requests } = scripted(cut, reply('ok'));
+  const { s, events } = session(chat, { features: { outputLimit: true }, cwd: tmp(), caps: ['completion', 'tools', 'thinking'], loadedCtx: 8192 });
+  await s.sendUser('go');
+  const limit = Number(requests[0].options!.num_predict);
+  assert.ok(limit > 1024 && limit <= 8192 - 256, `num_predict ${limit}`);
+  assert.match(requests[1].messages.at(-1)!.content, new RegExp(`cut off at the output limit \\(${limit} tokens\\) while you were still thinking`));
+  assert.match(ja(last(events, 'notice')!.text), /思考の途中/);
+});
+
+test('with thinking on, the conversation is compacted earlier', async () => {
+  // About 11K estimated tokens of history in a 16K window: past 65%, short of 80%.
+  const history: OllamaMessage[] = [
+    { role: 'user', content: `依頼 ${'あ'.repeat(5000)}` },
+    { role: 'assistant', content: `回答 ${'い'.repeat(5000)}` },
+  ];
+  const run = async (think: '' | 'off') => {
+    const { chat, requests } = scripted(reply('summary'), reply('ok'), reply('ok'));
+    const { s } = session(chat, { features: { outputLimit: true }, cwd: tmp(), caps: ['completion', 'tools', 'thinking'], loadedCtx: 16_384, history });
+    await s.configure({ model: 'test', think, numCtx: undefined, permissionMode: 'default', web: false, capabilities: ['completion', 'tools', 'thinking'] });
+    await s.sendUser('next');
+    return requests[0].messages.at(-1)!.content === SUMMARY_PROMPT;
+  };
+  assert.equal(await run(''), true, 'thinking: compacted');
+  assert.equal(await run('off'), false, 'thinking off: not yet');
+});
+
+test('near the limit, old tool outputs are dropped first, and no summary is needed when that frees enough', async () => {
+  const read = (id: string, file: string): OllamaMessage[] => [
+    { role: 'assistant', content: '', tool_calls: [{ id, function: { name: 'Read', arguments: { file_path: file } } }] },
+    { role: 'tool', content: `     1\t${file}\n${'あ'.repeat(6000)}`, tool_call_id: id, tool_name: 'Read' },
+  ];
+  const history: OllamaMessage[] = [
+    { role: 'user', content: 'look at both files' },
+    ...read('a', 'a.txt'),
+    ...read('b', 'b.txt'),
+    { role: 'assistant', content: 'done' },
+  ];
+  const store = new SessionStore(tmp());
+  const { chat, requests } = scripted(reply('ok'));
+  const { s, events } = session(chat, { features: { trimOutputs: true }, cwd: tmp(), loadedCtx: 16_384, history, store });
+  await s.sendUser('next');
+  assert.equal(requests.length, 1, 'no summary request');
+  const sent = requests[0].messages;
+  assert.ok(sent.filter((m) => m.role === 'tool').every((m) => m.content.startsWith(TRIMMED_PREFIX)));
+  assert.deepEqual(sent.at(-1), { role: 'user', content: 'next' });
+  const c = last(events, 'compact')!;
+  assert.deepEqual([c.trimmed, c.summary], [2, '']);
+  // Resuming replays the trimmed conversation.
+  assert.ok(toMessages((await store.load(SESSION))!).filter((m) => m.role === 'tool').every((m) => m.content.startsWith(TRIMMED_PREFIX)));
+});
+
+test('the todo list is shown again every few calls, and finishing with items left gets one reminder', async () => {
+  const cwd = tmp();
+  const todos = [
+    { content: 'write the parser', status: 'completed' },
+    { content: 'write the tests', status: 'in_progress' },
+  ];
+  const lists = Array.from({ length: 10 }, (_, i) => call(`ls${i}`, 'LS', { path: `.${'/.'.repeat(i)}` }));
+  const { chat, requests } = scripted(
+    reply('', [call('t', 'TodoWrite', { todos })]),
+    reply('', lists),
+    reply('done'),
+    reply('really done'),
+  );
+  const { s, events } = session(chat, { features: { todoList: true }, cwd });
+  await s.sendUser('go');
+  const results = events.filter((e): e is Extract<AgentEvent, { type: 'toolResult' }> => e.type === 'toolResult');
+  assert.match(results[0].output, /Todo list saved: 1 of 2 done/);
+  assert.match(results.at(-1)!.output, /\[Your todo list\]\n\[x\] write the parser\n\[>\] write the tests/);
+  assert.doesNotMatch(results.at(-2)!.output, /Your todo list/);
+  // "done" with an item left: reminded once, then the turn ends.
+  assert.match(requests[3].messages.at(-1)!.content, /^\[Your todo list still has unfinished items\]/);
+  assert.match(ja(last(events, 'notice')!.text), /未完了の項目が 1 件/);
+  assert.equal(requests.length, 4);
+  assert.equal(last(events, 'result')!.subtype, 'success');
+
+  // A resumed session remembers the list.
+  const history = requests[3].messages.slice(1);
+  const resumed = session(scripted(reply('ok'), reply('ok')).chat, { features: { todoList: true }, cwd, history: [...history, { role: 'assistant', content: 'really done' }] });
+  await resumed.s.sendUser('anything else?');
+  assert.ok(resumed.events.some((e) => e.type === 'notice'));
 });

@@ -42,6 +42,18 @@ test('Edit needs a prior Read and a unique match', async () => {
   assert.match(all.output, /2 replacements/);
 });
 
+test('with fuzzyEdit, Edit recovers from whitespace mistakes, and otherwise shows the most similar lines', async () => {
+  const ctx = { ...setup({ 'f.py': 'def f(x):\n    if x:\n        return 1\n    return 2\n' }), fuzzyEdit: true };
+  await runTool('Read', { file_path: 'f.py' }, ctx);
+  const fixed = await runTool('Edit', { file_path: 'f.py', old_string: 'if x:\n    return 1', new_string: 'if x:\n    return 10' }, ctx);
+  assert.equal(fixed.isError, false, fixed.output);
+  assert.match(fixed.output, /^Note: old_string did not match exactly; it matched lines 2-3/);
+  assert.equal(readFileSync(path.join(ctx.cwd, 'f.py'), 'utf8'), 'def f(x):\n    if x:\n        return 10\n    return 2\n');
+  const missed = await runTool('Edit', { file_path: 'f.py', old_string: '    if x:\n        return 11', new_string: 'x' }, ctx);
+  assert.equal(missed.isError, true);
+  assert.match(missed.output, /The most similar lines are 1-4:\n\s+1\tdef f\(x\):\n\s+2\t    if x:/);
+});
+
 test('a path that does not exist gets the working folder, and the file there with that name', async () => {
   const ctx = setup({ 'src/a.py': 'x\n' });
   const guess = path.join(path.sep, 'home', 'user', 'project', 'src', 'a.py');
