@@ -18,15 +18,39 @@ test('messages fill in their placeholders, including nested messages and lists',
   assert.equal(textOf('ja', 'plain text'), 'plain text', 'plain strings pass through');
 });
 
-test('an unknown or partial language falls back to Japanese', () => {
-  assert.equal(format('xx', msg('common.on')), 'オン');
+test('an unknown or partial language falls back to English', () => {
+  assert.equal(format('xx', msg('common.on')), 'On');
   assert.equal(format('ja', { key: 'no.such.key' as MessageKey }), 'no.such.key');
 });
 
-test('the browser language picks an offered language, else the default', () => {
+test('the browser language picks an offered language, else English', () => {
   assert.equal(matchLocale(['ja-JP', 'en-US']), 'ja');
-  assert.equal(matchLocale(['fr-FR']), 'ja');
-  assert.equal(matchLocale([]), 'ja');
+  assert.equal(matchLocale(['en-GB']), 'en');
+  assert.equal(matchLocale(['zh-CN']), 'zh-CN');
+  assert.equal(matchLocale(['zh-TW']), 'zh-CN', 'Traditional Chinese gets Simplified rather than English');
+  assert.equal(matchLocale(['fr-FR', 'ja']), 'ja', 'a later preference that is offered wins over the default');
+  assert.equal(matchLocale(['fr-FR']), 'en');
+  assert.equal(matchLocale([]), 'en');
+});
+
+test('a word can take the form that goes with a number', () => {
+  assert.equal(format('en', msg('secret.fileCount', { count: 1 })), '1 file');
+  assert.equal(format('en', msg('secret.fileCount', { count: 2 })), '2 files');
+  assert.equal(format('en', msg('secret.fileCount', { count: 0 })), '0 files');
+  assert.equal(format('en', msg('security.found', { ops: 'git add', count: 1 })), '⚠ Security check before git add: 1 finding');
+  assert.equal(format('zh-CN', msg('secret.fileCount', { count: 1 })), '1 个文件');
+  assert.deepEqual(placeholders('{count} {count|file|files} in {dir}'), ['count', 'dir']);
+});
+
+test('every offered language translates every key', () => {
+  const keys = Object.keys(ja).sort();
+  for (const [locale, { messages }] of Object.entries(LOCALES)) {
+    assert.deepEqual(Object.keys(messages).sort(), keys, locale);
+  }
+  assert.equal(
+    format('en', msg('settings.changed', { changes: [msg('settings.model', { from: 'a', to: 'b' }), msg('settings.web', { from: msg('common.off'), to: msg('common.on') })] })),
+    'Changed settings: model a → b, web search Off → On',
+  );
 });
 
 test('every catalog translates only known keys and keeps their placeholders', () => {

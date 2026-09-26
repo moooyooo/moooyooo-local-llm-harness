@@ -136,7 +136,7 @@ function ItemView({ item, onPermission }: { item: Exclude<Item, { kind: 'checkpo
     case 'result':
       return (
         <div className={`result ${item.isError ? 'error' : ''}`}>
-          {t(`result.${item.subtype}`)} · {item.numTurns} turns · {(item.durationMs / 1000).toFixed(1)}s
+          {t(`result.${item.subtype}`)} · {t('result.turns', { count: item.numTurns })} · {(item.durationMs / 1000).toFixed(1)}s
           {item.stats && <StatsText stats={item.stats} />}
           {item.message && <div>{tx(item.message)}</div>}
         </div>

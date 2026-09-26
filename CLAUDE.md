@@ -79,7 +79,9 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
   WebFetch never reaches this machine or the LAN (`checkUrl` plus a `lookup` that refuses private addresses at connect
   time, re-checked on every redirect). Queries and URLs carrying a secret (`findSecret`) are refused before sending.
 - `server/systemPrompt.ts`: environment, working rules, plan-mode rules, web rules, and the working folder's `AGENTS.md` / `CLAUDE.md`.
-- `shared/i18n/`: every GUI text, in catalogs per language (`ja.ts` is the source; English and Chinese are planned).
+- `shared/i18n/`: every GUI text, in catalogs per language (`ja.ts` is the source; `en.ts`, `zh-CN.ts`). The GUI starts in
+  the browser's language, or English (`DEFAULT_LOCALE`) when it isn't offered; the left panel switches it.
+  `{count|file|files}` picks a form by number.
   The server sends `Msg` (key + params) or plain strings (`Text`) instead of sentences; the GUI formats them (`t`, `tx`,
   `tNodes` in `web/src/i18n.ts`), so saved history follows the viewer's language.
 - `shared/protocol.ts`: browser⇄server messages. Session-scoped messages carry `key`, a client-generated tab ID.
@@ -115,5 +117,6 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
 - When you are unsure of an Ollama response shape, check it against the real server (`curl http://127.0.0.1:11434/api/chat ...`). Don't guess.
 - Local models have small contexts: cap tool output (`MAX_OUTPUT_CHARS`) and keep tool descriptions short and direct.
 - GUI text goes in the `shared/i18n` catalogs, never directly in code (`server/i18n.test.ts` fails otherwise); add keys
-  to `ja.ts` first. Text for the model (system prompt, tool results) stays in English. Server logs may stay Japanese.
+  to `ja.ts` first, then to `en.ts` and `zh-CN.ts` (typecheck fails until they have them). Text for the model (system
+  prompt, tool results) stays in English. Server logs may stay Japanese.
   Saved history keeps `Msg` keys and params, so once a key has shipped, don't rename its placeholders: add a new key instead.

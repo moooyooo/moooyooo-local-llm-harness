@@ -333,7 +333,8 @@ export function App() {
             {live && !shownModel && <option value={live.model}>{live.model}</option>}
             {state.models.map((m) => (
               <option key={m.name} value={m.name}>
-                {m.name}（{[m.parameterSize, formatBytes(m.size)].filter(Boolean).join(', ')}）{m.capabilities.includes('tools') ? '' : t('app.modelNoTools')}
+                {t('app.modelOption', { name: m.name, details: [m.parameterSize, formatBytes(m.size)].filter(Boolean).join(', ') })}
+                {m.capabilities.includes('tools') ? '' : t('app.modelNoTools')}
               </option>
             ))}
           </select>

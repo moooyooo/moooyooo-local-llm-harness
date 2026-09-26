@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { glob, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_LOCALE, textOf } from '../shared/i18n/index.js';
+import { textOf } from '../shared/i18n/index.js';
 import { parseTodos } from '../shared/todos.js';
 import { closestLines, fuzzyMatch } from './editMatch.js';
 import type { OllamaTool } from './ollama.js';
@@ -466,7 +466,7 @@ export function isWebTool(name: string): boolean {
 function checkOutgoing(text: string) {
   const secret = findSecret(text);
   if (secret) {
-    throw new ToolError(`This looks like it contains a secret (${textOf(DEFAULT_LOCALE, secret)}), so it was not sent. Leave secrets out of queries and URLs.`);
+    throw new ToolError(`This looks like it contains a secret (${textOf('en', secret)}), so it was not sent. Leave secrets out of queries and URLs.`);
   }
 }
 

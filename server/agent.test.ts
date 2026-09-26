@@ -515,7 +515,7 @@ test('a web query that carries a secret is refused before anything is sent or as
   s.configure({ model: 'test', think: '', permissionMode: 'default', web: true, capabilities: ['completion', 'tools'] });
   await s.sendUser('search');
   assert.ok(!events.some((e) => e.type === 'permission'), 'the user is not even asked');
-  assert.match(last(events, 'toolResult')!.output, /contains a secret \(AWS アクセスキー\)/);
+  assert.match(last(events, 'toolResult')!.output, /contains a secret \(AWS access key\)/);
 });
 
 test('without the tools capability no tools are sent', async () => {

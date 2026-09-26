@@ -53,6 +53,8 @@ body {
   color: var(--text);
   font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
 }
+/* Japanese fonts would draw Chinese with Japanese glyph shapes, and lack some simplified characters. */
+body:lang(zh) { font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", sans-serif; }
 code, pre { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
 pre { white-space: pre-wrap; word-break: break-word; background: var(--code-bg); padding: 8px 10px; border-radius: 6px; margin: 6px 0; max-height: 360px; overflow: auto; }
 button {

@@ -17,13 +17,13 @@ export function SessionPanel({ tab, onCompact }: { tab: Tab; onCompact: () => vo
       {s ? (
         <>
           <div>
-            <span>Session</span>
+            <span>{t('session.id')}</span>
             <code className="copyable" title={t('session.copyId', { id: s.sessionId })} onClick={() => navigator.clipboard?.writeText(s.sessionId)}>
               {s.sessionId.slice(0, 8)}…
             </code>
           </div>
-          <div><span>Model</span><code title={s.model}>{s.model}</code></div>
-          <div><span>Mode</span><code>{s.permissionMode}</code></div>
+          <div><span>{t('session.model')}</span><code title={s.model}>{s.model}</code></div>
+          <div><span>{t('session.mode')}</span><code>{s.permissionMode}</code></div>
           <div><span>{t('session.thinkCtx')}</span><code>{THINK_LABEL[s.think] ? t(THINK_LABEL[s.think]) : s.think} / {s.numCtx ? formatTokens(s.numCtx) : t('common.default')}</code></div>
           <div><span>{t('session.web')}</span><code>{t(s.web ? 'common.on' : 'common.off')}</code></div>
           {!s.tools && <div className="hint">{t('session.noTools')}</div>}

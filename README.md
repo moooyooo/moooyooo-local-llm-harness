@@ -11,8 +11,9 @@ Instead of driving a CLI, the server runs its own agent loop against Ollama's `/
 files and run commands. Everything stays on your machine, unless you turn web search on.
 
 - Tested on macOS (Apple silicon) with Ollama 0.32 and 0.34. Windows (with PowerShell as the shell) is supported by design but untested.
-- **UI language: Japanese for now; English and Chinese are planned.** All UI text lives in language catalogs, so a new
-  language is a new catalog (see [Adding a language](#adding-a-language)). Until then, button names are quoted below with their meaning.
+- **UI language: English, Japanese or Simplified Chinese.** The GUI starts in the browser's language (which follows the OS
+  unless you changed it), or in English when that is none of these; switch it under "Language" in the left panel.
+  Another language is one more catalog (see [Adding a language](#adding-a-language)).
 
 ![A finished turn: the agent wrote fizzbuzz.py and its tests, ran them after asking, and summarized](docs/screenshot.jpg)
 
@@ -37,8 +38,8 @@ npm start          # production: http://localhost:38720
 ```
 
 1. In the left panel, choose the working folder, model, thinking, context length and permission mode.
-2. Press 「開始」 (Start) and send a message.
-3. Before a file edit or a command, the GUI asks 「許可 / 拒否」 (Allow / Deny); edits are shown as diffs.
+2. Press **Start** and send a message.
+3. Before a file edit or a command, the GUI asks **Allow / Deny**; edits are shown as diffs.
 
 <img src="docs/screenshot-permission.jpg" alt="The agent asks before running a command" width="720">
 
@@ -50,7 +51,7 @@ npm run searxng                # start SearXNG (creates its settings and contain
 npm run searxng -- stop        # stop (or: status)
 ```
 
-Check 「Web 検索（SearXNG）」 (web search) in the left panel to let that tab's model use WebSearch / WebFetch (off by default).
+Check **Web search (SearXNG)** in the left panel to let that tab's model use WebSearch / WebFetch (off by default).
 
 ### Always on: start production at login (macOS)
 
@@ -91,7 +92,8 @@ Basics:
 
 For local LLMs:
 
-- **Ready for more languages**: all UI text is in per-language catalogs (Japanese now; English and Chinese planned)
+- **English, Japanese and Simplified Chinese UI**: picked from the browser's language (English otherwise) and switchable in
+  the left panel. Saved history is shown in the chosen language too
 
 - **Model picker** listing installed models with their tool / thinking / vision support, size and maximum context length
 - **Thinking** (default / on / off / low · medium · high) and **context length** (`num_ctx`)
@@ -105,20 +107,20 @@ For local LLMs:
   - the model is told to write large files about 200 lines at a time
   - each reply is capped at 16,384 tokens; a cut-off reply is retried once with a request to work in smaller steps
   - the connection stays open while the model writes a tool call (Ollama streams nothing meanwhile), and the time since the last output is shown
-  - after an error, an interrupt or a limit, 「続きから再開」 (continue) has the model check the working folder and carry on
+  - after an error, an interrupt or a limit, **Continue** has the model check the working folder and carry on
   - closing or reloading the page doesn't stop a session: the turn goes on, and the tab shows it again when the page
     comes back (open tabs are remembered in the browser). A session no page shows is stopped after 30 minutes without a turn running
-- **Image input** (vision models): paste a screenshot from the clipboard, drag and drop, or use the 「画像」 (image) button.
+- **Image input** (vision models): paste a screenshot from the clipboard, drag and drop, or use the **Image** button.
   Images are scaled to at most 1600 px (about 1,500 tokens each). After switching to a model without vision, earlier images become a note
 - **Settings between turns**: in a started tab, changing the model, thinking, context length, permission mode or web search applies from the next message
 - **Context compaction**: near 80% of the context window, older messages are replaced by a summary the model writes
   (Ollama silently drops the oldest part of an oversized prompt). The newest messages and the latest request are kept word for word.
-  「会話を要約」 (summarize) does it on demand, and the summary can be opened in the transcript
+  **Summarize conversation** does it on demand, and the summary can be opened in the transcript
 - **Web search** (off by default): searches through a local SearXNG and reads pages as plain text.
   Page fetches never reach this machine or the LAN, and queries or URLs that look like they carry a secret are not sent
 - **Checkpoints**: the working folder's files are recorded before each message (and every 10 file-changing tool calls
   in a long turn). Each checkpoint in the transcript shows what changed since, file by file with diffs, and
-  「ここに戻す」 (restore) puts the files back after a confirmation. The state before a restore is recorded too, so a
+  **Restore to here** puts the files back after a confirmation. The state before a restore is recorded too, so a
   restore can be undone, and the model is told about it. Checkpoints live in a git repository of the harness's own
   (`checkpoints/` in the data folder); the folder's own `.git` is never touched and the folder need not be a git
   repository. Left out: files in `.gitignore`, dependency folders, git repositories inside the folder and files over
@@ -173,19 +175,25 @@ Turn them on with `HARNESS_FEATURES`, e.g. `HARNESS_FEATURES=fuzzyEdit,todoList 
 - The server listens on `127.0.0.1` only, and the WebSocket accepts only its own origins
 - Local models make more mistakes than top cloud models. Use `bypassPermissions` and auto-approval only when you understand what they allow
 - With web search on, queries and fetched URLs leave your machine
-- Closing the page does not stop a running task. To stop one, use 「停止」 (stop) or close its tab (×)
+- Closing the page does not stop a running task. To stop one, use **Stop** or close its tab (×)
 
 ## Adding a language
 
-All text the GUI shows lives in `shared/i18n/`. Japanese (`ja.ts`) is the source: it defines the message keys, and fills in
-whatever a translation hasn't covered yet, so a partial translation already works.
+All text the GUI shows lives in `shared/i18n/`: `ja.ts` (Japanese), `en.ts` (English) and `zh-CN.ts` (Simplified Chinese).
+Japanese is the source: it defines the message keys. English is the default: a browser set to a language not offered
+gets it, and it fills in whatever a new translation hasn't covered yet.
 
-1. Copy `shared/i18n/ja.ts` to e.g. `shared/i18n/en.ts`, rename the export to `en`, type it `Catalog`, and translate the values.
-   Keep every `{placeholder}`.
-2. Register it in `LOCALES` in `shared/i18n/index.ts`, with the name to show (e.g. `en: { name: 'English', messages: en }`).
-   The GUI then picks it for browsers set to that language, and shows a language picker in the left panel.
-3. Run `npm test`: it checks that each catalog uses only known keys with the same placeholders, and fails if GUI text is
-   written directly in the code instead of the catalogs.
+1. Copy `shared/i18n/en.ts` to e.g. `shared/i18n/fr.ts`, rename the export to `fr`, and translate the values. Keep every
+   `{placeholder}`. `{count|file|files}` is the first form when `count` is 1 and the second otherwise; languages whose
+   words don't change with the number just write `{count}`. While it is partial, type it `Catalog` instead of
+   `Record<MessageKey, string>`.
+2. Register it in `LOCALES` in `shared/i18n/index.ts`, with the name to show (e.g. `fr: { name: 'Français', messages: fr }`).
+   The GUI then picks it for browsers set to that language and offers it in the left panel.
+3. Run `npm test`: it checks that each catalog uses only known keys with the same placeholders and that every offered
+   language covers every key, and fails if GUI text is written directly in the code instead of the catalogs.
+
+A new message goes into `ja.ts` first and then into every other catalog (`npm run typecheck` fails until `en.ts` and
+`zh-CN.ts` have it).
 
 The server sends messages as keys with values rather than finished sentences, so saved history is shown in the current
 language too. Output meant for whoever runs the harness (server logs, `scripts/`) is not translated yet.

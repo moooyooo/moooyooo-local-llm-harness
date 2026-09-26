@@ -21,6 +21,7 @@ export const ja = {
   'app.cwdLocked': '実行中は変更できません。新しいタブを使ってください',
   'app.model': 'モデル',
   'app.noModels': '(モデルなし)',
+  'app.modelOption': '{name}（{details}）',
   'app.modelNoTools': ' ※ツールなし',
   'app.think': '思考',
   'app.thinkHint': '思考（reasoning）の有無。オフにすると速くなりますが、難しい作業の質は下がります',
@@ -73,6 +74,9 @@ export const ja = {
 
   // --- Session panel, model capabilities, Ollama panel ------------------------------------------
   'session.copyId': '{id}（クリックでコピー）',
+  'session.id': 'セッション',
+  'session.model': 'モデル',
+  'session.mode': 'モード',
   'session.thinkCtx': '思考 / num_ctx',
   'session.web': 'Web 検索',
   'session.noTools': 'ツール非対応のモデル（会話のみ）',
@@ -172,6 +176,7 @@ export const ja = {
   'result.interrupted': '中断しました',
   'result.error': 'エラー',
   'result.max_turns': '上限で停止',
+  'result.turns': '{count} ターン',
 
   // --- Permission prompts and the pre-git security check ----------------------------------------
   'permission.request': '{tool} の実行許可',
