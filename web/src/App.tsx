@@ -3,6 +3,7 @@ import type { PermissionMode, ServerMessage, SessionSummary, ThinkSetting } from
 import { SessionHistory, Welcome } from './components/Sessions';
 import { ModelCaps, OllamaPanel, SessionPanel } from './components/SidebarParts';
 import { TabBar } from './components/TabBar';
+import { WorkingFolder } from './components/WorkingFolder';
 import type { CheckpointHandlers } from './components/Checkpoint';
 import { Composer, Transcript } from './components/Transcript';
 import {
@@ -94,7 +95,7 @@ export function App() {
   const locale = preferredLocale(settings.locale);
   setLocale(locale);
   const [initialTabs] = useState(loadTabs);
-  const { state, dispatch, send } = useHarness({ cwd: settings.lastCwd ?? '', saved: initialTabs }, (msg) => notify(msg));
+  const { state, dispatch, send, requestDirectory } = useHarness({ cwd: settings.lastCwd ?? '', saved: initialTabs }, (msg) => notify(msg));
   const tab = activeTab(state);
   const cwd = tabCwd(state, tab);
 
@@ -313,20 +314,9 @@ export function App() {
         <h1>{APP_TITLE} <span className="sub">for Ollama</span></h1>
         <div className={`conn ${state.connected ? 'ok' : 'ng'}`}>{t(state.connected ? 'app.connected' : 'app.disconnected')}</div>
 
-        <label>
-          {t('app.cwd')}
-          <input
-            list="recent-folders"
-            value={tab.cwd}
-            placeholder={state.defaultCwd}
-            disabled={tab.running}
-            title={tab.running ? t('app.cwdLocked') : undefined}
-            onChange={(e) => dispatch({ type: 'setCwd', key: tab.key, cwd: e.target.value })}
-          />
-          <datalist id="recent-folders">
-            {state.folders.filter((f) => f.exists).map((f) => <option key={f.path} value={f.path} />)}
-          </datalist>
-        </label>
+        <WorkingFolder key={tab.key} value={tab.cwd} defaultCwd={state.defaultCwd} disabled={tab.running}
+          connected={state.connected} recent={state.folders} request={requestDirectory}
+          onChange={(folder) => dispatch({ type: 'setCwd', key: tab.key, cwd: folder })} />
         <label>
           {t('app.model')}
           <select

@@ -34,11 +34,26 @@ export interface StartOptions extends SessionSettings {
 export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BASE64 = 16 * 1024 * 1024;
 
+/** Folder browsing is a GUI action, never an agent tool. Paths refer to the server's filesystem. */
+export interface DirectoryListing {
+  path: string;
+  parent?: string;
+  home: string;
+  projects?: string;
+  entries: { name: string; path: string }[];
+  truncated: boolean;
+}
+
+export type DirectoryRequest =
+  | { type: 'listDirectories'; path: string; complete?: boolean }
+  | { type: 'createDirectory'; parent: string; name: string };
+
 /**
  * One connection can run several sessions (GUI tabs). Session-scoped messages carry `key`,
  * a client-chosen tab ID (not the session ID).
  */
 export type ClientMessage =
+  | (DirectoryRequest & { requestId: string })
   | { type: 'start'; key: string; options: StartOptions }
   /** `images`: PNG / JPEG as plain base64 (Ollama rejects a `data:` prefix), for models with the `vision` capability. */
   | { type: 'user'; key: string; text: string; images?: string[] }
@@ -224,6 +239,7 @@ export interface FolderSummary {
 }
 
 export type ServerMessage =
+  | { type: 'directory'; requestId: string; data?: DirectoryListing; error?: Text }
   | { type: 'hello'; defaultCwd: string; dataDir: string }
   /** `searxng`: whether the local SearXNG behind WebSearch answers. */
   | { type: 'models'; ollama: OllamaStatus; models: ModelInfo[]; loaded: LoadedModel[]; searxng?: { url: string; ok: boolean } }

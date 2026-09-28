@@ -278,6 +278,9 @@ function updateTab(state: State, key: string, fn: (t: Tab) => Tab): State {
 
 function onServer(state: State, msg: ServerMessage, at: number): State {
   switch (msg.type) {
+    case 'directory':
+      // Request/reply data belongs to the folder picker, not to a session transcript.
+      return state;
     case 'hello':
       return { ...state, defaultCwd: msg.defaultCwd, dataDir: msg.dataDir };
     case 'models':
@@ -333,7 +336,7 @@ function onEvent(tab: Tab, ev: AgentEvent): Tab {
   switch (ev.type) {
     case 'init': {
       const { type: _, ...session } = ev;
-      return { ...tab, session };
+      return { ...tab, session, cwd: session.cwd };
     }
     case 'delta':
       return ev.channel === 'text'

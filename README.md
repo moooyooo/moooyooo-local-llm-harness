@@ -43,6 +43,11 @@ npm start          # production: http://localhost:38720
 2. Press **Start** and send a message.
 3. Before a file edit or a command, the GUI asks **Allow / Deny**; edits are shown as diffs.
 
+Use **Browse** beside the working folder to navigate from Home, Projects or a recent folder and choose a directory.
+You can also type a path directly, with `~` expansion (e.g. `~/Projects`) and suggestions as you type.
+To create a folder, open its parent, choose **+ New folder**, enter a name, then **Create and select**. Press **Start** when ready.
+Existing files and folders are never overwritten. A running tab's working folder cannot be changed.
+
 <img src="docs/screenshot-permission.jpg" alt="The agent asks before running a command" width="720">
 
 ### Web search setup (optional)

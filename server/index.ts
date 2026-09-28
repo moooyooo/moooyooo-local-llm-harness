@@ -11,6 +11,7 @@ import { MAX_IMAGE_BASE64, MAX_IMAGES } from '../shared/protocol.js';
 import type { ClientMessage, PermissionMode, ServerMessage, SessionSettings, ThinkSetting } from '../shared/protocol.js';
 import { AgentSession, type AgentConfig } from './agent.js';
 import { CheckpointStore } from './checkpoints.js';
+import { directoryRequest, resolveDirectory } from './directories.js';
 import { describeFeatures, parseFeatures } from './features.js';
 import { chat, describeError, getStatus, listLoaded, listModels, modelCapabilities, OLLAMA_URL, unloadModel } from './ollama.js';
 import { checkpointsOf, DATA_DIR, listFolders, SessionStore, toEvents, toMessages } from './store.js';
@@ -22,7 +23,7 @@ const PORT = Number(process.env.PORT ?? (DEV ? DEV_SERVER_PORT : PROD_PORT));
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** Built GUI to serve. scripts/harness.mjs uses dist-prod/, so a development `npm run build` never swaps production's GUI. */
 const DIST = path.resolve(ROOT, process.env.HARNESS_DIST ?? 'dist');
-const DEFAULT_CWD = process.env.HARNESS_CWD ?? process.cwd();
+const DEFAULT_CWD = resolveDirectory(process.env.HARNESS_CWD ?? process.cwd());
 /** Sessions at once. They share the machine's memory, so keep this modest. */
 const MAX_SESSIONS = 10;
 /** A session no GUI shows any more is stopped after this long without a turn running (see `live`). */
@@ -177,7 +178,7 @@ wss.on('connection', (ws: WebSocket) => {
     const token = Symbol(key);
     starting.set(key, token);
     const o = msg.options;
-    const cwd = path.resolve(o.cwd || DEFAULT_CWD);
+    const cwd = resolveDirectory(o.cwd || DEFAULT_CWD, DEFAULT_CWD);
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
       return send({ type: 'error', key, message: text('error.noFolder', { path: cwd }) });
     }
@@ -235,6 +236,13 @@ wss.on('connection', (ws: WebSocket) => {
       return send({ type: 'error', message: 'Invalid JSON from client' });
     }
     switch (msg.type) {
+      case 'listDirectories':
+      case 'createDirectory':
+        if (!isValidKey(msg.requestId)) return;
+        directoryRequest(msg, DEFAULT_CWD)
+          .then((data) => send({ type: 'directory', requestId: msg.requestId, data }))
+          .catch((err) => send({ type: 'directory', requestId: msg.requestId, error: errorText(err) }));
+        return;
       case 'setAutoApprove':
         conn.autoApprove = !!msg.enabled;
         for (const l of live.values()) if (l.owner === conn) l.autoApprove = conn.autoApprove;

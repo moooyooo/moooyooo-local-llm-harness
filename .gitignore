@@ -23,6 +23,3 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
-
-# personal notes, kept out of the repository
-TODO.md

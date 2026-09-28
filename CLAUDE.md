@@ -9,6 +9,29 @@ The local folder may still be called `custom-harnes-local-llm`.
 READMEs: `README.md` (English) and `README.ja.md` (Japanese); keep them in step.
 It is for personal, local use only: do not add features that expose it to other users or to the network.
 
+## Shared task state (Claude Code and Codex)
+
+Before editing, read `PROJECT_STATUS.md` for the current owner, blockers and latest handoff, and `TODO.md` for
+the shared backlog and known issues. Both agents use these same files; do not keep separate agent-specific lists.
+After a task, update its TODO/issue and `PROJECT_STATUS.md` with the authoring agent, date, results, verification,
+remaining limitations and running-app status. A task completed by Codex is also completed for Claude Code.
+Check the current Git status and diff when taking over, preserve uncommitted work, and avoid simultaneous edits
+to the same working tree. `AGENTS.md` is Codex's entry point; this file's architecture and rules apply to both agents.
+
+## Publishing checks
+
+The user requires a privacy and secret review before every push, including documentation-only changes.
+
+- Review the exact staged changes and every outgoing commit, including intermediate versions that were later removed.
+  Check for credentials, tokens, private keys, personal contact details, private local paths, logs and session data.
+- Run the local secret scanner (`scanBeforeGit` in `server/secretScan.ts`) for pending changes and outgoing history.
+  Review its findings and limits; it does not replace checking personal information or screenshots and other attachments.
+  Do not upload candidate secrets or private files to an external scanning service.
+- Check author/committer names and emails as well as commit messages. Keep the existing public handle and GitHub
+  noreply identity; do not publish a personal email address. Keep environment files, local settings and generated data ignored.
+- Resolve actual exposures before pushing, and record the scope, results and any unverified limits in `PROJECT_STATUS.md`.
+  If the user has already authorized publishing and the review is clear, proceed without asking for approval again.
+
 ## Architecture
 
 ```
@@ -81,6 +104,9 @@ Browser (React, web/) ⇄ WebSocket /ws ⇄ Node server (server/) ⇄ HTTP (NDJS
   WebFetch never reaches this machine or the LAN (`checkUrl` plus a `lookup` that refuses private addresses at connect
   time, re-checked on every redirect). Queries and URLs carrying a secret (`findSecret`) are refused before sending.
 - `server/systemPrompt.ts`: environment, working rules, plan-mode rules, web rules, and the working folder's `AGENTS.md` / `CLAUDE.md`.
+- `server/directories.ts`: GUI folder browsing, path completion and single-folder creation through the existing
+  Origin-checked WebSocket (`listDirectories` / `createDirectory`, replies correlated by `requestId`). Not agent tools.
+  `resolveDirectory` expands `~` for both browsing and session starts. The picker lives in `web/src/components/WorkingFolder.tsx`.
 - `shared/i18n/`: every GUI text, in catalogs per language (`ja.ts` is the source; `en.ts`, `zh-CN.ts`). The GUI starts in
   the browser's language, or English (`DEFAULT_LOCALE`) when it isn't offered; the left panel switches it.
   `{count|file|files}` picks a form by number.
