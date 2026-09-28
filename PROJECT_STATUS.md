@@ -19,8 +19,8 @@ Claude Code / Codex 共通の作業記録です。会話履歴の共有を前提
 
 - 担当: Codex
 - 作業: 作業フォルダの参照・パス補完・新規作成と、Claude/Codex間の共有記録の整備
-- 状態: 完了・本番反映済み（2026-09-28）
-- Claude Codeへの引き継ぎ: この作業はCodexが実装・検証・本番反映まで完了しました。同じ変更の再実装は不要です。
+- 状態: 完了・本番反映済み・GitHub公開済み（2026-09-28）
+- Claude Codeへの引き継ぎ: この作業はCodexが実装・検証・本番反映・GitHubへのpushまで完了しました。同じ変更の再実装は不要です。
 
 ## ブロックリスト
 
@@ -56,7 +56,7 @@ Claude Code / Codex 共通の作業記録です。会話履歴の共有を前提
 - `scripts/mac/autostart.sh restart` で本番を再ビルド・再起動済み。`http://localhost:38720` の画面でも
   「参照」、サブフォルダ一覧、「新規フォルダ」「作成して選択」の表示とレイアウトを確認。
 - 今回の追加機能はmacOSで検証。Windows実機での動作確認は行っていません。
-- `TODO.md` のGit除外を解除し、共有用ファイルも機能変更と一緒に公開する対象に含めています。公開前確認は下記を参照してください。
+- `TODO.md` のGit除外を解除し、共有用ファイルも機能変更と一緒に公開しました。公開時の確認は下記を参照してください。
 
 ### Claude Code が次に作業するとき
 
@@ -64,7 +64,7 @@ Claude Code / Codex 共通の作業記録です。会話履歴の共有を前提
 - フォルダ選択機能は今回のCodex担当作業です。完了した内容を未実装として扱わないでください。
 - 他の既知の問題や未着手機能の解決を、今回の完了に含めないでください。
 
-## 2026-09-28: GitHub 公開前確認（Codex）
+## 2026-09-28: GitHub 公開・公開前確認（Codex）
 
 - ユーザーから、公開可能な品質であればコミット・pushまで行う指示を受けました。
 - 公開先: `moooyooo/moooyooo-local-llm-harness` の `main`（公開リポジトリ）。
@@ -74,6 +74,12 @@ Claude Code / Codex 共通の作業記録です。会話履歴の共有を前提
   検出候補のメール形式やホームパスはテスト用の例でした。既存のスクリーンショット2枚も目視確認済みです。
 - TODOの検証記録から、公開に不要な個人環境の作業フォルダパスを削除しました。
 - コミットの著者・メール設定は公開ハンドル名とGitHubのnoreplyアドレスです。未公開の既存コミットはありませんでした。
-  新規コミット後にも、送信対象の履歴と実際の著者・コミッター情報を確認します。
+  新規コミット後にも、送信対象の履歴と実際の著者・コミッター情報を確認し、問題は見つかりませんでした。
 - 公開前に `npm run typecheck`、`npm test`（120件成功）、`npm run build`、`git diff --check` を再確認し、すべて成功しました。
 - 今回のレビューは公開対象ファイルと新たに送信する履歴が対象です。既に公開済みの過去全コミットに対する遡及監査ではありません。
+- 実装と共有ルールのコミット: [`f6e3495`](https://github.com/moooyooo/moooyooo-local-llm-harness/commit/f6e3495ef385a14d9010e197a02ec3c2013cdb26)。
+  `origin/main` へのpushに成功し、GitHub APIでも反映を確認しました。
+- [実装コミットのCI](https://github.com/moooyooo/moooyooo-local-llm-harness/actions/runs/36438451479) は
+  Ubuntu（Node 22・24）、macOS（Node 24）、Windows（Node 24）の全4ジョブが成功しました。WindowsのGUI実機確認とは別です。
+- この公開結果の追記も、差分・個人情報・秘密情報・コミット情報を確認してからpushします。
+  GitHub上の継続検証は [CI](https://github.com/moooyooo/moooyooo-local-llm-harness/actions/workflows/ci.yml) を参照してください。
